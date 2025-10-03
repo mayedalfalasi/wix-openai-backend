@@ -1,0 +1,11 @@
+{
+  "name": "wix-openai-backend",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "openai": "^4.56.0",
+    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.6.0"
+  }
+}
