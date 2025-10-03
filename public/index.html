@@ -1,137 +1,200 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BizDoc – Document Analyzer</title>
   <style>
-    :root { --bg:#0b0c10; --card:#121318; --muted:#a0a3ab; --text:#eef2ff; --accent:#4f46e5; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:linear-gradient(180deg,#0b0c10,#121318 45%, #0b0c10); color:var(--text); }
-    .wrap { max-width: 880px; margin: 40px auto; padding: 0 16px; }
-    .header { display:flex; align-items:center; gap:12px; margin-bottom: 18px;}
-    .logo { width:40px; height:40px; border-radius:12px; background: var(--accent); display:grid; place-items:center; font-weight:800; }
-    h1 { margin: 0 0 6px; letter-spacing: .2px; font-size: 28px;}
-    p.muted { margin:0; color: var(--muted); }
-    .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-radius:16px; padding:18px; margin-top:18px; backdrop-filter: blur(4px); }
-    label { display:block; margin:10px 0 6px; font-weight:600; }
-    input[type="file"] { display:block; width:100%; padding:14px; background:#0f1117; border:1px dashed rgba(255,255,255,.2); border-radius:12px; color:var(--muted); }
-    textarea, input[type="text"] { width:100%; padding:12px 14px; background:#0f1117; border:1px solid rgba(255,255,255,.12); border-radius:12px; color:var(--text); }
-    .row { display:grid; grid-template-columns: 1fr 180px; gap:12px; align-items:end; }
-    button { padding:12px 16px; background: var(--accent); color:white; border:0; border-radius:12px; cursor:pointer; font-weight:700; }
-    button:disabled { opacity:.6; cursor:not-allowed; }
-    .status { margin-top:10px; color: var(--muted); font-size: 14px; }
-    pre { white-space: pre-wrap; word-break: break-word; background:#0b0c10; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; }
-    .footer { margin:18px 0 28px; color:var(--muted); font-size: 13px; }
-    .pill { display:inline-block; padding:4px 10px; font-size:12px; border-radius:999px; background:rgba(79,70,229,.2); color: #cdd3ff; }
-    a { color:#cdd3ff; }
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --border: #e5e7eb;
+      --bg: #ffffff;
+      --text: #111827;
+      --subtext: #6b7280;
+    }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    header {
+      padding: 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    header .logo {
+      background: var(--primary);
+      color: white;
+      font-weight: bold;
+      font-size: 1.25rem;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      margin: 0;
+    }
+
+    main {
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 1rem;
+    }
+
+    .card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .card h2 {
+      font-size: 1rem;
+      margin-top: 0;
+      color: var(--subtext);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    input[type="file"],
+    textarea {
+      width: 100%;
+      margin-top: 0.5rem;
+      margin-bottom: 1rem;
+      padding: 0.5rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 1rem;
+    }
+
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background: var(--primary-hover);
+    }
+
+    pre {
+      background: #f9fafb;
+      border: 1px solid var(--border);
+      padding: 1rem;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      overflow-x: auto;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 0.25rem 0.75rem;
+      border-radius: 12px;
+      background: #f3f4f6;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+
+    footer {
+      text-align: center;
+      padding: 2rem;
+      font-size: 0.875rem;
+      color: var(--subtext);
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="header">
-      <div class="logo">B</div>
-      <div>
-        <h1>BizDoc – Document Analyzer</h1>
-        <p class="muted">Upload a business document, add an instruction, and get an AI summary.</p>
-      </div>
+  <header>
+    <div class="logo">B</div>
+    <h1>BizDoc – Document Analyzer</h1>
+  </header>
+
+  <main>
+    <div class="card" id="health-card">
+      <h2>Health</h2>
+      <div id="health-status" class="status">Checking...</div>
     </div>
 
     <div class="card">
-      <div class="pill">Health</div>
-      <p class="status" id="ping">Checking <code>/api/ping</code>…</p>
-    </div>
-
-    <div class="card">
-      <label for="file">Document</label>
-      <input id="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.jpg,.jpeg,.png" />
-      <label for="instruction">Instruction (optional)</label>
+      <h2>Document</h2>
+      <input type="file" id="fileInput" />
+      <h2>Instruction (optional)</h2>
       <textarea id="instruction" rows="3" placeholder="e.g., Summarize key risks, KPIs, and next actions."></textarea>
-
-      <div class="row" style="margin-top:12px;">
-        <div class="status" id="status">Idle</div>
-        <button id="analyzeBtn">Analyze</button>
-      </div>
-
-      <div id="resultBox" style="display:none; margin-top:12px;">
-        <label>Result</label>
-        <pre id="result"></pre>
-      </div>
+      <button id="analyzeBtn">Analyze</button>
     </div>
 
-    <div class="footer">
-      Tip: You can also POST a JSON body to <code>/api/analyze</code> with a <code>fileUrl</code> instead of uploading a file.
+    <div class="card">
+      <h2>Result</h2>
+      <pre id="result">No analysis yet.</pre>
     </div>
-  </div>
+  </main>
+
+  <footer>
+    &copy; 2025 BizDoc – Powered by OpenAI
+  </footer>
 
   <script>
-    const API_BASE = location.origin;
-
-    async function ping() {
-      const el = document.getElementById('ping');
+    async function checkHealth() {
       try {
-        const r = await fetch(`${API_BASE}/api/ping`);
-        if (!r.ok) throw new Error(r.status);
-        const data = await r.json();
-        el.textContent = `OK ${data.time}`;
-      } catch (e) {
-        el.textContent = `Ping failed: ${e.message}`;
+        const res = await fetch("/api/ping");
+        const data = await res.json();
+        document.getElementById("health-status").textContent =
+          data.ok ? "OK " + data.time : "Failed";
+      } catch (err) {
+        document.getElementById("health-status").textContent = "Failed";
       }
     }
 
     async function analyze() {
-      const fileInput = document.getElementById('file');
-      const instruction = document.getElementById('instruction').value.trim();
-      const status = document.getElementById('status');
-      const btn = document.getElementById('analyzeBtn');
-      const out = document.getElementById('result');
-      const box = document.getElementById('resultBox');
+      const fileInput = document.getElementById("fileInput");
+      const instruction = document.getElementById("instruction").value;
+      const result = document.getElementById("result");
 
-      box.style.display = 'none';
-      out.textContent = '';
-      status.textContent = 'Preparing…';
-      btn.disabled = true;
+      if (!fileInput.files.length) {
+        alert("Please choose a file first.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("file", fileInput.files[0]);
+      if (instruction) formData.append("instruction", instruction);
+
+      result.textContent = "Analyzing...";
 
       try {
-        if (!fileInput.files || !fileInput.files[0]) {
-          status.textContent = 'Please choose a file.';
-          btn.disabled = false;
-          return;
-        }
-        const file = fileInput.files[0];
-
-        const form = new FormData();
-        form.append('file', file);
-        form.append('instruction', instruction);
-        form.append('filename', file.name);
-
-        status.textContent = 'Uploading & analyzing…';
-        const res = await fetch(`${API_BASE}/api/analyze`, {
-          method: 'POST',
-          body: form
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          body: formData
         });
-
-        const isJson = (res.headers.get('content-type') || '').includes('application/json');
-        if (!res.ok) {
-          const msg = isJson ? JSON.stringify(await res.json()) : await res.text();
-          throw new Error(`Backend ${res.status}: ${msg}`);
-        }
-
-        const data = isJson ? await res.json() : { ok: true, note: 'Non-JSON response', text: await res.text() };
-        box.style.display = 'block';
-        out.textContent = JSON.stringify(data, null, 2);
-        status.textContent = 'Done!';
+        const data = await res.json();
+        result.textContent = JSON.stringify(data, null, 2);
       } catch (err) {
-        box.style.display = 'block';
-        out.textContent = `Error: ${err.message}`;
-        status.textContent = 'Failed';
-      } finally {
-        btn.disabled = false;
+        result.textContent = "Error: " + err.message;
       }
     }
 
-    document.getElementById('analyzeBtn').addEventListener('click', analyze);
-    ping();
+    document.getElementById("analyzeBtn").addEventListener("click", analyze);
+    checkHealth();
   </script>
 </body>
 </html>
