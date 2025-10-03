@@ -1,77 +1,11 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BizDoc API</title>
-  <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 40px; max-width: 800px; }
-    h1 { margin-bottom: 4px; }
-    .muted { color: #666; margin-top: 0; }
-    .card { border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; margin: 16px 0; }
-    label { display:block; font-weight:600; margin: 10px 0 6px; }
-    input, textarea { width:100%; padding:10px; border:1px solid #ccc; border-radius:8px; }
-    button { padding:10px 16px; border:0; border-radius:8px; cursor:pointer; }
-  </style>
-</head>
-<body>
-  <h1>BizDoc Backend</h1>
-  <p class="muted">Vercel serverless API for your Wix upload flow.</p>
-
-  <div class="card">
-    <h3>Health</h3>
-    <p id="pingStatus">Checking <code>/api/ping</code>…</p>
-    <button id="retry">Retry</button>
-  </div>
-
-  <div class="card">
-    <h3>Quick Analyze Test</h3>
-    <label>File URL (e.g. a Wix media URL)</label>
-    <input id="fileUrl" placeholder="https://..."/>
-    <label>Instruction (optional)</label>
-    <textarea id="instruction" rows="3" placeholder="Summarize this document"></textarea>
-    <div style="margin-top:10px;">
-      <button id="send">POST /api/analyze</button>
-    </div>
-    <pre id="result" style="white-space:pre-wrap;margin-top:12px;"></pre>
-  </div>
-
-  <script>
-    const API_BASE = location.origin;
-
-    async function ping() {
-      const el = document.getElementById('pingStatus');
-      try {
-        const r = await fetch(`${API_BASE}/api/ping`);
-        if (!r.ok) throw new Error(r.status);
-        const data = await r.json();
-        el.textContent = `OK: ${data.time}`;
-      } catch (e) {
-        el.textContent = `Ping failed: ${e.message}`;
-      }
-    }
-
-    document.getElementById('retry').onclick = ping;
-
-    document.getElementById('send').onclick = async () => {
-      const fileUrl = document.getElementById('fileUrl').value.trim();
-      const instruction = document.getElementById('instruction').value.trim();
-      const out = document.getElementById('result');
-      out.textContent = 'Sending…';
-      try {
-        const r = await fetch(`${API_BASE}/api/analyze`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileUrl, instruction, filename: fileUrl.split('/').pop() || 'file' })
-        });
-        const data = await r.json();
-        out.textContent = JSON.stringify(data, null, 2);
-      } catch (e) {
-        out.textContent = `Error: ${e.message}`;
-      }
-    };
-
-    ping();
-  </script>
-</body>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>BizDoc Backend</title>
+  </head>
+  <body>
+    <h1>It works 🎉</h1>
+    <p><a href="/api/ping">Try /api/ping</a></p>
+  </body>
 </html>
