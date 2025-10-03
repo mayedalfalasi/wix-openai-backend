@@ -1,224 +1,176 @@
-// api/analyze.js
-// Accepts EITHER:
-//  - multipart/form-data: fields -> file (binary), instruction (text, optional), filename (optional)
-//  - JSON: { fileUrl, filename, instruction }
-// Extracts text (PDF/DOCX/TXT/CSV) and asks OpenAI for a business-style summary.
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BizDoc – Document Analyzer</title>
+  <style>
+    :root { --bg:#0b0c10; --card:#121318; --muted:#a0a3ab; --text:#eef2ff; --accent:#4f46e5; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:linear-gradient(180deg,#0b0c10,#121318 45%, #0b0c10); color:var(--text); }
+    .wrap { max-width: 880px; margin: 40px auto; padding: 0 16px; }
+    .header { display:flex; align-items:center; gap:12px; margin-bottom: 18px;}
+    .logo { width:40px; height:40px; border-radius:12px; background: var(--accent); display:grid; place-items:center; font-weight:800; }
+    h1 { margin: 0 0 6px; letter-spacing: .2px; font-size: 28px;}
+    p.muted { margin:0; color: var(--muted); }
+    .card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06); border-radius:16px; padding:18px; margin-top:18px; backdrop-filter: blur(4px); }
+    label { display:block; margin:10px 0 6px; font-weight:600; }
+    input[type="file"] { display:block; width:100%; padding:14px; background:#0f1117; border:1px dashed rgba(255,255,255,.2); border-radius:12px; color:var(--muted); }
+    textarea { width:100%; padding:12px 14px; background:#0f1117; border:1px solid rgba(255,255,255,.12); border-radius:12px; color:var(--text); }
+    .row { display:grid; grid-template-columns: 1fr 180px 180px; gap:12px; align-items:end; }
+    button { padding:12px 16px; background: var(--accent); color:white; border:0; border-radius:12px; cursor:pointer; font-weight:700; }
+    button.secondary { background:#1f2430; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .status { margin-top:10px; color: var(--muted); font-size: 14px; }
+    pre { white-space: pre-wrap; word-break: break-word; background:#0b0c10; border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:12px; }
+    .footer { margin:18px 0 28px; color:var(--muted); font-size: 13px; }
+    .pill { display:inline-block; padding:4px 10px; font-size:12px; border-radius:999px; background:rgba(79,70,229,.2); color: #cdd3ff; }
+  </style>
+  <!-- jsPDF for client-side PDF download -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="logo">B</div>
+      <div>
+        <h1>BizDoc – Document Analyzer</h1>
+        <p class="muted">Upload a business document, add an instruction, and get an AI summary.</p>
+      </div>
+    </div>
 
-const OpenAI = require("openai");
-const pdfParse = require("pdf-parse");
-const mammoth = require("mammoth");
+    <div class="card">
+      <div class="pill">Health</div>
+      <p class="status" id="ping">Checking <code>/api/ping</code>…</p>
+    </div>
 
-const MAX_BYTES = 12 * 1024 * 1024; // 12MB safety
-const SUPPORTED = [".pdf", ".docx", ".txt", ".csv"];
+    <div class="card">
+      <label for="file">Document</label>
+      <input id="file" type="file" accept=".pdf,.docx,.txt,.csv" />
+      <label for="instruction">Instruction (optional)</label>
+      <textarea id="instruction" rows="3" placeholder="e.g., Summarize key risks, KPIs, and next actions."></textarea>
 
-module.exports = async (req, res) => {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
+      <div class="row" style="margin-top:12px;">
+        <div class="status" id="status">Idle</div>
+        <button id="analyzeBtn">Analyze</button>
+        <button id="downloadBtn" class="secondary" disabled>Download PDF</button>
+      </div>
 
-  try {
-    const contentType = (req.headers["content-type"] || "").toLowerCase();
-    let filename = null;
-    let instruction = "";
-    let fileBuffer = null;
-    let fileUrl = null;
+      <div id="resultBox" style="display:none; margin-top:12px;">
+        <label>Result</label>
+        <pre id="result"></pre>
+      </div>
+    </div>
 
-    if (contentType.startsWith("multipart/form-data")) {
-      // ---- Multipart path (browser upload) ----
-      const form = await parseMultipart(req);
-      instruction = (form.instruction || "").toString();
-      filename = form.filename || (form.file && form.file.filename) || "file";
-      if (!form.file || !form.file.buffer) {
-        return res.status(400).json({ error: "file is required (multipart field 'file')" });
-      }
-      fileBuffer = form.file.buffer;
-    } else {
-      // ---- JSON path (URL-based) ----
-      if (!contentType.includes("application/json")) {
-        return res.status(400).json({ error: "Unsupported Content-Type. Use multipart/form-data or application/json." });
-      }
-      const body = req.body || {};
-      fileUrl = body.fileUrl;
-      filename = body.filename || (fileUrl ? fileUrl.split("/").pop() : "file");
-      instruction = body.instruction || "";
-      if (!fileUrl) return res.status(400).json({ error: "fileUrl is required in JSON mode" });
-      const fetched = await fetch(fileUrl);
-      if (!fetched.ok) return res.status(400).json({ error: `Unable to fetch fileUrl (${fetched.status})` });
-      const ab = await fetched.arrayBuffer();
-      fileBuffer = Buffer.from(ab);
-    }
+    <div class="footer">
+      Tip: You can also POST JSON to <code>/api/analyze</code> with a <code>fileUrl</code>.
+    </div>
+  </div>
 
-    // Basic validations
-    if (fileBuffer.length > MAX_BYTES) {
-      return res.status(400).json({ error: `File too large. Max ${Math.round(MAX_BYTES/1024/1024)}MB.` });
-    }
+  <script>
+    const API_BASE = location.origin;
+    let lastSummary = null;
+    let lastFilename = null;
 
-    const ext = guessExt(filename, contentType);
-    if (!SUPPORTED.includes(ext)) {
-      return res.status(400).json({ error: `Unsupported file type ${ext}. Supported: ${SUPPORTED.join(", ")}` });
-    }
-
-    // Extract text
-    const extracted = await extractText(fileBuffer, ext);
-    if (!extracted || extracted.trim().length === 0) {
-      return res.status(400).json({ error: "Could not extract text from the file." });
-    }
-
-    // Ask OpenAI
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const prompt = buildPrompt(extracted, instruction);
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are BizDoc, an expert business analyst. Be concise, structured, and practical." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.2,
-      max_tokens: 900
-    });
-
-    const analysis = completion.choices?.[0]?.message?.content || "(no content)";
-
-    return res.status(200).json({
-      ok: true,
-      mode: fileUrl ? "json-url" : "multipart-upload",
-      filename,
-      sizeKB: Math.round(fileBuffer.length / 1024),
-      instruction,
-      summary: analysis,
-      receivedAt: new Date().toISOString()
-    });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: "Server error" });
-  }
-};
-
-// ---------- Helpers ----------
-
-function guessExt(filename, contentType) {
-  const lower = (filename || "").toLowerCase();
-  if (lower.endsWith(".pdf")) return ".pdf";
-  if (lower.endsWith(".docx")) return ".docx";
-  if (lower.endsWith(".txt")) return ".txt";
-  if (lower.endsWith(".csv")) return ".csv";
-  // simple fallback via content-type
-  if (contentType.includes("pdf")) return ".pdf";
-  if (contentType.includes("wordprocessingml")) return ".docx";
-  if (contentType.includes("text/plain")) return ".txt";
-  if (contentType.includes("csv")) return ".csv";
-  return ".txt"; // best-effort
-}
-
-async function extractText(buffer, ext) {
-  if (ext === ".pdf") {
-    const data = await pdfParse(buffer);
-    return data.text || "";
-  }
-  if (ext === ".docx") {
-    const { value } = await mammoth.extractRawText({ buffer });
-    return value || "";
-  }
-  if (ext === ".txt" || ext === ".csv") {
-    return buffer.toString("utf8");
-  }
-  return "";
-}
-
-function buildPrompt(extractedText, instruction) {
-  const clipped = extractedText.length > 12000 ? extractedText.slice(0, 12000) + "\n...[truncated]" : extractedText;
-  const userAsk = instruction && instruction.trim().length > 0
-    ? `\n\nUser instruction:\n${instruction.trim()}`
-    : "";
-
-  return `Analyze the following business document and provide a structured executive summary.
-Focus on:
-- Key takeaways (bulleted)
-- KPIs / metrics table (if present)
-- Risks & mitigations
-- Action items with owners & timelines (make reasonable assumptions if missing)
-- Opportunities or cost savings
-- One-paragraph conclusion
-
-Document text (raw, may be messy):
-"""
-${clipped}
-"""${userAsk}
-
-Output format:
-1) **Executive Summary**
-- ...
-
-2) **KPIs**
-| Metric | Value | Source/Note |
-
-3) **Risks & Mitigations**
-- Risk: ... | Mitigation: ...
-
-4) **Action Items**
-- Owner | Task | Due | Next Step
-
-5) **Opportunities**
-- ...
-
-6) **Conclusion**
-`;
-}
-
-/**
- * Minimal multipart/form-data parser
- * Returns { file: { filename, buffer }, filename, instruction, ...textFields }
- */
-async function parseMultipart(req) {
-  const chunks = [];
-  await new Promise((resolve, reject) => {
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", resolve);
-    req.on("error", reject);
-  });
-  const body = Buffer.concat(chunks);
-
-  const ct = req.headers["content-type"] || "";
-  const boundary = /boundary=([^;]+)/i.exec(ct)?.[1];
-  if (!boundary) return {};
-
-  const parts = body.toString("binary").split(`--${boundary}`);
-  const result = {};
-  for (const part of parts) {
-    if (!part || part === "--\r\n") continue;
-    const [rawHeaders, rawValue] = splitOnce(part, "\r\n\r\n");
-    if (!rawHeaders || !rawValue) continue;
-
-    const valueBinary = rawValue.slice(0, -2); // drop trailing CRLF
-    const headers = rawHeaders.split("\r\n").filter(Boolean);
-
-    let name = null, filename = null;
-    for (const h of headers) {
-      const hl = h.toLowerCase();
-      if (hl.startsWith("content-disposition")) {
-        const m1 = /name="([^"]+)"/i.exec(h);
-        const m2 = /filename="([^"]+)"/i.exec(h);
-        if (m1) name = m1[1];
-        if (m2) filename = decodeURIComponent(m2[1]);
+    async function ping() {
+      const el = document.getElementById('ping');
+      try {
+        const r = await fetch(`${API_BASE}/api/ping`);
+        if (!r.ok) throw new Error(r.status);
+        const data = await r.json();
+        el.textContent = `OK ${data.time}`;
+      } catch (e) {
+        el.textContent = `Ping failed: ${e.message}`;
       }
     }
-    if (!name) continue;
 
-    if (filename) {
-      result[name] = { filename, buffer: Buffer.from(valueBinary, "binary") };
-    } else {
-      result[name] = Buffer.from(valueBinary, "binary").toString("utf8");
+    async function analyze() {
+      const fileInput = document.getElementById('file');
+      const instruction = document.getElementById('instruction').value.trim();
+      const status = document.getElementById('status');
+      const btn = document.getElementById('analyzeBtn');
+      const out = document.getElementById('result');
+      const box = document.getElementById('resultBox');
+      const dlBtn = document.getElementById('downloadBtn');
+
+      box.style.display = 'none';
+      out.textContent = '';
+      status.textContent = 'Preparing…';
+      btn.disabled = true;
+      dlBtn.disabled = true;
+      lastSummary = null;
+
+      try {
+        if (!fileInput.files || !fileInput.files[0]) {
+          status.textContent = 'Please choose a file.';
+          btn.disabled = false;
+          return;
+        }
+        const file = fileInput.files[0];
+        lastFilename = file.name;
+
+        const form = new FormData();
+        form.append('file', file);
+        form.append('instruction', instruction);
+        form.append('filename', file.name);
+
+        status.textContent = 'Uploading & analyzing…';
+        const res = await fetch(`${API_BASE}/api/analyze`, { method: 'POST', body: form });
+
+        const isJson = (res.headers.get('content-type') || '').includes('application/json');
+        if (!res.ok) {
+          const msg = isJson ? JSON.stringify(await res.json()) : await res.text();
+          throw new Error(`Backend ${res.status}: ${msg}`);
+        }
+
+        const data = isJson ? await res.json() : { note: 'Non-JSON response', text: await res.text() };
+        lastSummary = data.summary || JSON.stringify(data, null, 2);
+
+        box.style.display = 'block';
+        out.textContent = lastSummary;
+        status.textContent = 'Done!';
+        dlBtn.disabled = false;
+      } catch (err) {
+        box.style.display = 'block';
+        out.textContent = `Error: ${err.message}`;
+        status.textContent = 'Failed';
+      } finally {
+        btn.disabled = false;
+      }
     }
-  }
-  return result;
-}
 
-function splitOnce(s, sep) {
-  const i = s.indexOf(sep);
-  if (i === -1) return [s, ""];
-  return [s.slice(0, i), s.slice(i + sep.length)];
-}
+    function downloadPDF() {
+      if (!lastSummary) return;
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const margin = 40;
+      let y = margin;
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text('BizDoc – AI Summary', margin, y);
+      y += 24;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      const meta = `File: ${lastFilename || 'document'}   |   Generated: ${new Date().toLocaleString()}`;
+      doc.text(meta, margin, y);
+      y += 18;
+
+      const lines = doc.splitTextToSize(lastSummary, 520);
+      for (const line of lines) {
+        if (y > 780) { doc.addPage(); y = margin; }
+        doc.text(line, margin, y);
+        y += 14;
+      }
+
+      const outName = (lastFilename || 'report').replace(/\.[^.]+$/, '') + '_summary.pdf';
+      doc.save(outName);
+    }
+
+    document.getElementById('analyzeBtn').addEventListener('click', analyze);
+    document.getElementById('downloadBtn').addEventListener('click', downloadPDF);
+    ping();
+  </script>
+</body>
+</html>
