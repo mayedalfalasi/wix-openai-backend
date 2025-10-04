@@ -1,213 +1,79 @@
-// api/analyze.js
-// Accepts EITHER:
-//  - multipart/form-data: fields -> file (binary), instruction (optional), filename (optional)
-//  - JSON: { fileUrl, filename, instruction }
-// Extracts text (PDF/DOCX/TXT/CSV) and asks OpenAI for a business-style summary.
+// pages/api/analyze.js
+import OpenAI from "openai";
 
-const OpenAI = require("openai");
-const pdfParse = require("pdf-parse");
-const mammoth = require("mammoth");
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const MAX_BYTES = 12 * 1024 * 1024; // 12MB
-const SUPPORTED = [".pdf", ".docx", ".txt", ".csv"];
+const DEFAULT_INSTRUCTION =
+  "Summarize the document overall for a general business audience. " +
+  "Include a short executive summary, 3–7 bullet highlights, and any key risks/next steps. " +
+  "Be concise and objective.";
 
-module.exports = async (req, res) => {
-  // CORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
+function buildInstruction(userInstruction) {
+  const ui = (userInstruction || "").trim();
+  return ui ? `${DEFAULT_INSTRUCTION}\n\nUser instruction: ${ui}` : DEFAULT_INSTRUCTION;
+}
 
+async function fetchBuffer(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Failed to fetch file: ${r.status} ${await r.text()}`);
+  return Buffer.from(await r.arrayBuffer());
+}
+
+export default async function handler(req, res) {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ error: "OPENAI_API_KEY not set in environment" });
+    if (req.method !== "POST") {
+      res.setHeader("Allow", ["POST"]);
+      return res.status(405).json({ ok: false, message: "Method not allowed" });
     }
 
-    const contentType = (req.headers["content-type"] || "").toLowerCase();
-    let filename = null;
-    let instruction = "";
+    const contentType = req.headers["content-type"] || "";
     let fileBuffer = null;
-    let fileUrl = null;
+    let filename = "document";
+    let userInstruction = "";
 
-    if (contentType.startsWith("multipart/form-data")) {
-      // ---- multipart upload ----
-      const form = await parseMultipart(req);
-      instruction = (form.instruction || "").toString();
-      filename = form.filename || (form.file && form.file.filename) || "file";
-      if (!form.file || !form.file.buffer) {
-        return res.status(400).json({ error: "file is required (multipart field 'file')" });
-      }
-      fileBuffer = form.file.buffer;
-    } else {
-      // ---- JSON with fileUrl ----
-      if (!contentType.includes("application/json")) {
-        return res.status(400).json({ error: "Unsupported Content-Type. Use multipart/form-data or application/json." });
-      }
+    if (contentType.includes("application/json")) {
       const body = req.body || {};
-      fileUrl = body.fileUrl;
-      filename = body.filename || (fileUrl ? fileUrl.split("/").pop() : "file");
-      instruction = body.instruction || "";
-      if (!fileUrl) return res.status(400).json({ error: "fileUrl is required in JSON mode" });
-      const fetched = await fetch(fileUrl);
-      if (!fetched.ok) return res.status(400).json({ error: `Unable to fetch fileUrl (${fetched.status})` });
-      const ab = await fetched.arrayBuffer();
-      fileBuffer = Buffer.from(ab);
-    }
-
-    // validations
-    if (fileBuffer.length > MAX_BYTES) {
-      return res.status(400).json({ error: `File too large. Max ${Math.round(MAX_BYTES/1024/1024)}MB.` });
-    }
-
-    const ext = guessExt(filename, contentType);
-    if (!SUPPORTED.includes(ext)) {
-      return res.status(400).json({ error: `Unsupported file type ${ext}. Supported: ${SUPPORTED.join(", ")}` });
-    }
-
-    // extract text
-    const extracted = await extractText(fileBuffer, ext);
-    if (!extracted || extracted.trim().length === 0) {
-      return res.status(400).json({ error: "Could not extract text from the file." });
-    }
-
-    // OpenAI call
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    const prompt = buildPrompt(extracted, instruction);
-
-    const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are BizDoc, an expert business analyst. Be concise, structured, and practical." },
-        { role: "user", content: prompt }
-      ],
-      temperature: 0.2,
-      max_tokens: 900
-    });
-
-    const analysis = completion.choices?.[0]?.message?.content || "(no content)";
-
-    return res.status(200).json({
-      ok: true,
-      mode: fileUrl ? "json-url" : "multipart-upload",
-      filename,
-      sizeKB: Math.round(fileBuffer.length / 1024),
-      instruction,
-      summary: analysis,
-      receivedAt: new Date().toISOString()
-    });
-  } catch (e) {
-    console.error(e);
-    // surface OpenAI errors clearly
-    return res.status(500).json({ error: e?.response?.data || e.message || "Server error" });
-  }
-};
-
-// ---- helpers ----
-function guessExt(filename, contentType) {
-  const lower = (filename || "").toLowerCase();
-  if (lower.endsWith(".pdf")) return ".pdf";
-  if (lower.endsWith(".docx")) return ".docx";
-  if (lower.endsWith(".txt")) return ".txt";
-  if (lower.endsWith(".csv")) return ".csv";
-  if (contentType.includes("pdf")) return ".pdf";
-  if (contentType.includes("wordprocessingml")) return ".docx";
-  if (contentType.includes("text/plain")) return ".txt";
-  if (contentType.includes("csv")) return ".csv";
-  return ".txt";
-}
-
-async function extractText(buffer, ext) {
-  if (ext === ".pdf") {
-    const data = await pdfParse(buffer);
-    return data.text || "";
-  }
-  if (ext === ".docx") {
-    const { value } = await mammoth.extractRawText({ buffer });
-    return value || "";
-  }
-  if (ext === ".txt" || ext === ".csv") {
-    return buffer.toString("utf8");
-  }
-  return "";
-}
-
-function buildPrompt(extractedText, instruction) {
-  const clipped = extractedText.length > 12000 ? extractedText.slice(0, 12000) + "\n...[truncated]" : extractedText;
-  const extra = instruction?.trim() ? `\n\nUser instruction:\n${instruction.trim()}` : "";
-  return `Analyze the following business document and provide a structured executive summary.
-Focus on:
-- Key takeaways (bulleted)
-- KPIs / metrics table (if present)
-- Risks & mitigations
-- Action items with owners & timelines (make reasonable assumptions if missing)
-- Opportunities or cost savings
-- One-paragraph conclusion
-
-Document text:
-"""
-${clipped}
-"""${extra}
-
-Output format:
-1) **Executive Summary**
-- ...
-
-2) **KPIs**
-| Metric | Value | Source/Note |
-
-3) **Risks & Mitigations**
-- Risk: ... | Mitigation: ...
-
-4) **Action Items**
-- Owner | Task | Due | Next Step
-
-5) **Opportunities**
-- ...
-
-6) **Conclusion**
-`;
-}
-
-async function parseMultipart(req) {
-  const chunks = [];
-  await new Promise((resolve, reject) => {
-    req.on("data", (c) => chunks.push(c));
-    req.on("end", resolve);
-    req.on("error", reject);
-  });
-  const body = Buffer.concat(chunks);
-  const ct = req.headers["content-type"] || "";
-  const boundary = /boundary=([^;]+)/i.exec(ct)?.[1];
-  if (!boundary) return {};
-
-  const parts = body.toString("binary").split(`--${boundary}`);
-  const result = {};
-  for (const part of parts) {
-    if (!part || part === "--\r\n") continue;
-    const i = part.indexOf("\r\n\r\n");
-    if (i === -1) continue;
-    const rawHeaders = part.slice(0, i);
-    const rawValue = part.slice(i + 4, part.length - 2); // drop final CRLF
-    const headers = rawHeaders.split("\r\n").filter(Boolean);
-
-    let name = null, filename = null;
-    for (const h of headers) {
-      const hl = h.toLowerCase();
-      if (hl.startsWith("content-disposition")) {
-        const m1 = /name="([^"]+)"/i.exec(h);
-        const m2 = /filename="([^"]+)"/i.exec(h);
-        if (m1) name = m1[1];
-        if (m2) filename = decodeURIComponent(m2[1]);
+      if (body.fileUrl) {
+        fileBuffer = await fetchBuffer(body.fileUrl);
+        filename = body.filename || "document";
+      } else {
+        throw new Error('Missing "fileUrl" in JSON body');
       }
-    }
-    if (!name) continue;
-
-    if (filename) {
-      result[name] = { filename, buffer: Buffer.from(rawValue, "binary") };
+      userInstruction = body.instruction || "";
     } else {
-      result[name] = Buffer.from(rawValue, "binary").toString("utf8");
+      throw new Error("Unsupported Content-Type. Use JSON with {fileUrl}.");
     }
+
+    if (!fileBuffer) throw new Error("No file bytes were received.");
+
+    const uploaded = await openai.files.create({
+      file: new Blob([fileBuffer]),
+      purpose: "assistants",
+      filename,
+    });
+
+    const finalInstruction = buildInstruction(userInstruction);
+
+    const response = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: [
+        {
+          role: "user",
+          content: [{ type: "input_text", text: finalInstruction }],
+        },
+      ],
+      attachments: [{ file_id: uploaded.id, tools: [{ type: "file_search" }] }],
+    });
+
+    const text =
+      response.output_text ||
+      (Array.isArray(response.output)
+        ? response.output.map((p) => p.content?.[0]?.text).join("\n")
+        : "") ||
+      "No summary was returned.";
+
+    res.status(200).json({ ok: true, filename, summary: text, model: response.model });
+  } catch (err) {
+    res.status(400).json({ ok: false, message: err?.message || String(err) });
   }
-  return result;
 }
