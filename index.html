@@ -5,36 +5,65 @@
   <title>AI Document Analyzer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    :root { color-scheme: light dark; }
     body { font-family: system-ui, Arial, Segoe UI; margin: 24px; color: #111; }
     .wrap { max-width: 900px; margin: 0 auto; }
-    h1 { margin-bottom: 8px; }
+    h1 { margin: 0 0 8px; }
     p.sub { color: #666; margin-top: 0; }
-    label { display:block; margin: 14px 0 6px; font-weight:500; }
-    input[type=file], textarea, select {
+    label { display:block; margin: 14px 0 6px; font-weight: 500; }
+    input[type=file], textarea, select, input[type=text] {
       width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 10px;
+      background: #fff;
     }
     textarea { font-family: ui-monospace, Consolas; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 10px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px; }
     button { padding:10px 16px; border:0; border-radius:10px; background:#111; color:#fff; cursor:pointer; }
     button.secondary { background:#e9e9e9; color:#111; }
-    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px; }
-    #status { color:#666; }
+    #status, #status2 { color:#666; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>AI Document Analyzer</h1>
-    <p class="sub">Upload a file, add optional instructions, and get an AI summary or insights. Hosted on Vercel.</p>
+    <p class="sub">Upload a file, add optional instructions, get an AI summary, and download the result.</p>
 
     <!-- Upload -->
     <label>Upload file</label>
     <input id="file" type="file"
            accept=".txt,.md,.csv,.json,.log,.pdf,.doc,.docx,.rtf,.xls,.xlsx,.ppt,.pptx,.html,.xml,.yaml,.yml" />
 
-    <!-- Instructions -->
-    <label>Instructions (optional)</label>
-    <textarea id="instruction" rows="5" placeholder="e.g. Summarize key points, list risks, extract action items…"></textarea>
+    <!-- (Optional) Quick template -->
+    <label>Quick template (optional)</label>
+    <div class="row">
+      <select id="template" style="flex:1 1 280px;">
+        <option value="">— Select a template —</option>
+        <option>Executive summary (bullet points, very concise)</option>
+        <option>Extract action items (with owners and due dates if found)</option>
+        <option>List risks and red flags (severity + rationale)</option>
+        <option>Financial insights and totals (AED where applicable)</option>
+        <option>Client-facing brief (friendly, professional tone)</option>
+        <option>Arabic summary (الفكرة العامة + النقاط الرئيسية)</option>
+      </select>
+      <button id="addTemplate" class="secondary">Add to instructions</button>
+    </div>
 
-    <!-- Analyze Button -->
+    <!-- Analysis options -->
+    <label>Analysis options</label>
+    <div class="grid">
+      <label><input type="checkbox" class="opt" value="Summarize key points"> Summarize key points</label>
+      <label><input type="checkbox" class="opt" value="Extract action items with owners and due dates if present"> Extract action items</label>
+      <label><input type="checkbox" class="opt" value="List risks and red flags with severity and rationale"> List risks & red flags</label>
+      <label><input type="checkbox" class="opt" value="Provide financial insights and totals; convert currencies to AED when possible"> Financial insights</label>
+      <label><input type="checkbox" class="opt" value="Generate an executive summary for busy stakeholders"> Executive summary</label>
+      <label><input type="checkbox" class="opt" value="Write a client-facing brief in a friendly, professional tone"> Client brief</label>
+    </div>
+
+    <!-- Free-form instruction -->
+    <label>Extra instructions (optional)</label>
+    <textarea id="instruction" rows="5" placeholder="Any custom prompts, business context, or specific questions…"></textarea>
+
+    <!-- Analyze -->
     <div class="row">
       <button id="analyzeBtn">Analyze</button>
       <span id="status"></span>
@@ -44,36 +73,56 @@
     <label style="margin-top:18px;">Result</label>
     <textarea id="out" rows="14" placeholder="Results will appear here…"></textarea>
 
-    <!-- ======= Download Section ======= -->
-    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
-      <input id="filename" type="text" value="analysis.txt"
-             style="padding:10px;border:1px solid #ddd;border-radius:10px;min-width:220px" />
-      <button id="downloadBtn"
-              style="padding:10px 16px;border:0;border-radius:10px;background:#111;color:#fff;cursor:pointer;">
-        Download Result
-      </button>
-      <span id="status2" style="align-self:center;color:#666"></span>
+    <!-- Download -->
+    <div class="row" style="margin-top:14px;">
+      <input id="filename" type="text" value="analysis.txt" style="min-width:220px" />
+      <button id="downloadBtn">Download Result</button>
+      <span id="status2"></span>
     </div>
   </div>
 
   <script>
-    // ====== CONFIG ======
+    // =========================
+    // Config / helpers
+    // =========================
     const API_URL = "/api/analyze";
     const MAX_MB = 20;
-
-    const $ = (s) => document.querySelector(s);
+    const $ = (sel) => document.querySelector(sel);
     const setStatus = (m) => { const el = $("#status"); if (el) el.textContent = m || ""; };
 
-    // ====== ANALYZE FUNCTION ======
+    function cleanFilename(name) {
+      name = (name || "analysis.txt").trim();
+      if (!/\.[a-z0-9]{1,8}$/i.test(name)) name += ".txt";
+      return name.replace(/[^\w.\-]/g, "_");
+    }
+
+    // =========================
+    // UI wiring
+    // =========================
+    $("#addTemplate").addEventListener("click", () => {
+      const t = $("#template").value;
+      if (!t) return;
+      const box = $("#instruction");
+      box.value = (box.value + (box.value ? "\n" : "") + t).trim();
+    });
+
+    // Analyze flow
     $("#analyzeBtn").addEventListener("click", async () => {
       const file = $("#file").files?.[0];
       const out = $("#out");
-      const instruction = ($("#instruction").value || "").trim() || "Summarize this document.";
+      const custom = ($("#instruction").value || "").trim();
+      const selected = [...document.querySelectorAll(".opt:checked")].map(x => x.value);
+
+      const parts = [];
+      if (selected.length) {
+        parts.push("Perform the following analyses:");
+        parts.push(" - " + selected.join("\n - "));
+      }
+      if (custom) parts.push("\nAdditional instructions:\n" + custom);
+      const instruction = (parts.join("\n").trim() || "Summarize the document overall.");
 
       if (!file) { out.value = "Pick a file first."; return; }
-      if (file.size > MAX_MB * 1024 * 1024) {
-        out.value = `File too large (max ${MAX_MB} MB).`; return;
-      }
+      if (file.size > MAX_MB * 1024 * 1024) { out.value = `File too large (max ${MAX_MB} MB).`; return; }
 
       setStatus("Uploading and analyzing…");
       out.value = "Analyzing…";
@@ -96,17 +145,7 @@
       }
     });
 
-    // ====== DOWNLOAD FUNCTION ======
-    function inIframe() {
-      try { return window.self !== window.top; } catch (_) { return true; }
-    }
-
-    function cleanFilename(name) {
-      name = (name || "analysis.txt").trim();
-      if (!/\.[a-z0-9]{1,8}$/i.test(name)) name += ".txt";
-      return name.replace(/[^\w.\-]/g, "_");
-    }
-
+    // Download (server POST, target _self for Wix-initiated tabs)
     document.getElementById("downloadBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = cleanFilename(document.getElementById("filename").value);
@@ -117,39 +156,26 @@
         return;
       }
 
-      // Direct Vercel page → Blob download
-      if (!inIframe()) {
-        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      } else {
-        // Wix iframe fallback (just in case)
-        const form = document.createElement("form");
-        form.method = "POST";
-        form.action = "/api/download";
-        form.target = "_blank";
-        form.style.display = "none";
+      // Build a one-time form posting the text to /api/download
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = "/api/download";
+      form.target = "_self";           // important for Wix → download in the same tab
+      form.style.display = "none";
 
-        const f1 = document.createElement("input");
-        f1.name = "filename";
-        f1.value = filename;
-        form.appendChild(f1);
+      const f1 = document.createElement("input");
+      f1.name = "filename";
+      f1.value = filename;
+      form.appendChild(f1);
 
-        const f2 = document.createElement("textarea");
-        f2.name = "text";
-        f2.value = text;
-        form.appendChild(f2);
+      const f2 = document.createElement("textarea");
+      f2.name = "text";
+      f2.value = text;
+      form.appendChild(f2);
 
-        document.body.appendChild(form);
-        form.submit();
-        form.remove();
-      }
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
     });
   </script>
 </body>
