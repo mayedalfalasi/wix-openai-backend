@@ -1,137 +1,53 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Document Analyzer</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body { font-family: system-ui, Arial, Segoe UI; margin: 24px; color: #111; }
-    .wrap { max-width: 900px; margin: 0 auto; }
-    h1 { margin: 0 0 8px; }
-    p.sub { color: #666; margin-top: 0; }
-    label { display:block; margin: 14px 0 6px; }
-    input[type=file], textarea, select {
-      width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 10px;
-    }
-    textarea { font-family: ui-monospace, Consolas; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
-    .row { display:flex; gap:10px; flex-wrap: wrap; align-items:center; }
-    button { padding:10px 16px; border:0; border-radius:10px; background:#111; color:#fff; cursor:pointer; }
-    button.secondary { background:#e9e9e9; color:#111; }
-    #status { color:#666; }
-  </style>
+<meta charset="utf-8" />
+<title>Document Analyzer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+body{font-family:system-ui,Arial;margin:24px;color:#111}
+.wrap{max-width:900px;margin:0 auto}
+input,textarea,select{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px}
+button{padding:10px 16px;border:0;border-radius:8px;cursor:pointer;background:#111;color:#fff}
+button.secondary{background:#eee;color:#111}
+textarea{font-family:ui-monospace,Consolas}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Document Analyzer</h1>
-    <p class="sub">Upload a file, choose analysis options, add optional instructions, and get results. Hosted on Vercel.</p>
-
-    <label>Upload file</label>
-    <input id="file" type="file" accept=".txt,.md,.csv,.json,.log,.pdf,.doc,.docx,.rtf,.xls,.xlsx,.ppt,.pptx,.html,.xml,.yaml,.yml" />
-
-    <label>Quick template</label>
-    <div class="row">
-      <select id="template">
-        <option value="">— Select a template (optional) —</option>
-        <option>Executive summary (bullet points, very concise)</option>
-        <option>Extract action items (with owners and due dates if found)</option>
-        <option>List risks and red flags (severity + rationale)</option>
-        <option>Financial insights and totals (AED where applicable)</option>
-        <option>Client-facing brief (friendly, professional tone)</option>
-        <option>Arabic summary (الفكرة العامة + النقاط الرئيسية)</option>
-      </select>
-      <button id="addTemplate" class="secondary">Add to instructions</button>
-    </div>
-
-    <label>Analysis options</label>
-    <div class="grid">
-      <label><input type="checkbox" class="opt" value="Summarize key points"> Summarize key points</label>
-      <label><input type="checkbox" class="opt" value="Extract action items with owners and due dates if present"> Extract action items</label>
-      <label><input type="checkbox" class="opt" value="List risks and red flags with severity and rationale"> List risks & red flags</label>
-      <label><input type="checkbox" class="opt" value="Provide financial insights and totals; convert currencies to AED when possible"> Financial insights</label>
-      <label><input type="checkbox" class="opt" value="Generate an executive summary for busy stakeholders"> Executive summary</label>
-      <label><input type="checkbox" class="opt" value="Write a client-facing brief in a friendly, professional tone"> Client brief</label>
-    </div>
-
-    <label>Extra instructions (optional)</label>
-    <textarea id="instruction" rows="5" placeholder="Any custom prompts, business context, or specific questions…"></textarea>
-
-    <div class="row" style="margin-top:14px;">
-      <button id="analyzeBtn">Analyze</button>
-      <button id="downloadBtn" class="secondary">Download .txt</button>
-      <span id="status"></span>
-    </div>
-
-    <label style="margin-top:18px;">Result</label>
-    <textarea id="out" rows="14" placeholder="Results will appear here…"></textarea>
-  </div>
-
-  <script>
-    const API_URL = "/api/analyze"; // same Vercel app serves UI + API
-    const MAX_MB = 20;
-
-    const $ = (sel) => document.querySelector(sel);
-    const setStatus = (m) => { const el = $("#status"); if (el) el.textContent = m || ""; };
-
-    $("#addTemplate").addEventListener("click", () => {
-      const t = $("#template").value;
-      if (!t) return;
-      const box = $("#instruction");
-      box.value = (box.value + (box.value ? "\\n" : "") + t).trim();
-    });
-
-    $("#downloadBtn").addEventListener("click", () => {
-      const text = $("#out").value || "";
-      const blob = new Blob([text], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "analysis.txt";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    });
-
-    $("#analyzeBtn").addEventListener("click", async () => {
-      const file = $("#file").files?.[0];
-      const out = $("#out");
-      const custom = ($("#instruction").value || "").trim();
-      const selected = [...document.querySelectorAll(".opt:checked")].map(x => x.value);
-
-      const parts = [];
-      if (selected.length) {
-        parts.push("Perform the following analyses:");
-        parts.push(" - " + selected.join("\\n - "));
-      }
-      if (custom) parts.push("\\nAdditional instructions:\\n" + custom);
-      const instruction = (parts.join("\\n").trim() || "Summarize the document overall.");
-
-      if (!file) { out.value = "Pick a file first."; return; }
-      if (file.size > MAX_MB * 1024 * 1024) { out.value = "File too large (max " + MAX_MB + " MB)."; return; }
-
-      setStatus("Uploading and analyzing…");
-      out.value = "Analyzing…";
-
-      try {
-        const fd = new FormData();
-        fd.append("file", file);
-        fd.append("instruction", instruction);
-
-        const res = await fetch(API_URL, { method: "POST", body: fd });
-
-        let data;
-        const text = await res.text();
-        try { data = JSON.parse(text); } catch { data = { error: text }; }
-
-        if (!res.ok) throw new Error(data?.error || "Request failed");
-        out.value = (data?.result || "").trim() || "No result.";
-        setStatus("Done");
-      } catch (e) {
-        out.value = "Error: " + e.message;
-        setStatus("Failed");
-      }
-    });
-  </script>
+<div class="wrap">
+<h1>Document Analyzer</h1>
+<p>Upload a file, select options, and get an instant AI analysis.</p>
+<label>Upload file</label>
+<input id="file" type="file" />
+<label>Instructions (optional)</label>
+<textarea id="instruction" rows="4" placeholder="e.g. Summarize, extract key points, etc."></textarea>
+<div style="margin:12px 0;">
+<button id="analyze">Analyze</button>
+<button id="download" class="secondary">Download .txt</button>
+<span id="status" style="margin-left:8px;color:#666"></span>
+</div>
+<textarea id="output" rows="14" placeholder="Result will appear here..."></textarea>
+</div>
+<script>
+const API="/api/analyze";
+const $=s=>document.querySelector(s);
+$("#analyze").onclick=async()=>{
+  const f=$("#file").files[0];if(!f)return $("#output").value="Select a file first.";
+  const ins=$("#instruction").value||"Summarize the document.";
+  $("#status").textContent="Analyzing...";
+  const fd=new FormData();fd.append("file",f);fd.append("instruction",ins);
+  try{
+    const r=await fetch(API,{method:"POST",body:fd});
+    const t=await r.text();let d;try{d=JSON.parse(t);}catch{d={error:t};}
+    if(!r.ok)throw new Error(d.error||"Request failed");
+    $("#output").value=d.result.trim();$("#status").textContent="Done";
+  }catch(e){$("#output").value="Error: "+e.message;$("#status").textContent="Failed";}
+};
+$("#download").onclick=()=>{
+  const b=new Blob([$("#output").value||""],{type:"text/plain"});
+  const u=URL.createObjectURL(b);const a=document.createElement("a");
+  a.href=u;a.download="analysis.txt";a.click();URL.revokeObjectURL(u);
+};
+</script>
 </body>
 </html>
