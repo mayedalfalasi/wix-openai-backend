@@ -1,151 +1,121 @@
-// api/analyze.js
-// Node runtime + no default bodyParser so we can accept multipart uploads.
-export const config = { api: { bodyParser: false } };
-
 import OpenAI from "openai";
-import Busboy from "busboy";
 import pdf from "pdf-parse";
 
-// ---------- CORS helpers ----------
-function setCors(res) {
-  // In production, you can replace '*' with your Wix site origin for tighter security.
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || "*";
+
+// ---------- helpers ----------
+function setCORS(res) {
+  res.setHeader("Access-Control-Allow-Origin", ALLOW_ORIGIN);
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
-// ---------- small utilities ----------
-function readJson(req) {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk) => (data += chunk));
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(data || "{}"));
-      } catch (e) {
-        reject(e);
-      }
-    });
-    req.on("error", reject);
+function badRequest(res, message, extra = {}) {
+  res.statusCode = 400;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ ok: false, error: message, ...extra }));
+}
+
+function serverError(res, e, extra = {}) {
+  console.error("ERROR /api/analyze:", e);
+  res.statusCode = 500;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ ok: false, error: e?.message || "Server error", ...extra }));
+}
+
+async function fetchArrayBufferFromUrl(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Failed to fetch fileUrl: ${r.status} ${r.statusText}`);
+  const ab = await r.arrayBuffer();
+  return Buffer.from(ab);
+}
+
+async function extractTextFromBuffer(buf, filename = "") {
+  const lower = (filename || "").toLowerCase();
+  if (lower.endsWith(".pdf")) {
+    const data = await pdf(buf);
+    return data.text || "";
+  }
+  if (lower.endsWith(".txt")) return buf.toString("utf8");
+  try { return buf.toString("utf8"); } catch { return ""; }
+}
+
+function createOpenAI() {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
+  return new OpenAI({ apiKey });
+}
+
+async function summarizeText(text, instruction) {
+  const openai = createOpenAI();
+  const system =
+    "You are BizDoc, a precise business-document assistant. Summarize for a general business audience. Be concise and objective. Prefer bullet lists for highlights.";
+  const userPrompt = [
+    instruction?.trim()
+      ? `Instruction:\n${instruction.trim()}\n`
+      : `Instruction:\nSummarize the document overall.\n`,
+    "\nDocument:\n",
+    text.slice(0, 200000),
+  ].join("");
+
+  const resp = await openai.chat.completions.create({
+    model: OPENAI_MODEL,
+    temperature: 0.2,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: userPrompt },
+    ],
   });
+
+  return resp?.choices?.[0]?.message?.content?.trim() || "(No content returned)";
 }
 
-function readMultipart(req) {
-  return new Promise((resolve, reject) => {
-    const bb = Busboy({ headers: req.headers });
-    let fileBuffer = null;
-    let filename = "";
-    let instruction = "";
-
-    bb.on("file", (name, file, info) => {
-      const chunks = [];
-      filename = info?.filename || "document";
-      file.on("data", (d) => chunks.push(d));
-      file.on("end", () => (fileBuffer = Buffer.concat(chunks)));
-    });
-
-    bb.on("field", (name, val) => {
-      if (name === "instruction") instruction = String(val || "");
-      if (name === "filename" && !filename) filename = String(val || "");
-    });
-
-    bb.on("error", reject);
-    bb.on("finish", () => resolve({ fileBuffer, filename, instruction }));
-    req.pipe(bb);
-  });
-}
-
-// ---------- OpenAI client ----------
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
-// ---------- main handler ----------
 export default async function handler(req, res) {
-  setCors(res);
+  setCORS(res);
 
-  // CORS preflight
   if (req.method === "OPTIONS") return res.status(204).end();
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, message: "Method not allowed" });
+  if (req.method !== "POST") return badRequest(res, "Use POST");
+
+  // Read raw body then parse JSON (Vercel req may not be pre-parsed)
+  let body;
+  try {
+    const raw = await new Promise((resolve, reject) => {
+      let d = "";
+      req.on("data", c => d += c);
+      req.on("end", () => resolve(d));
+      req.on("error", reject);
+    });
+    body = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return badRequest(res, "Invalid JSON body", { detail: e.message });
   }
 
   try {
-    const ct = req.headers["content-type"] || "";
-    let fileBuffer = null;
-    let filename = "document";
-    let instruction = "";
-
-    if (ct.includes("application/json")) {
-      // JSON: { fileUrl, filename?, instruction? }
-      const body = await readJson(req);
-      if (!body?.fileUrl) {
-        return res
-          .status(400)
-          .json({ ok: false, message: "Missing 'fileUrl' in JSON body" });
-      }
-
-      filename = body.filename || filename;
-      instruction = body.instruction || "";
-      const r = await fetch(body.fileUrl);
-      if (!r.ok) throw new Error(`Download failed: ${r.status} ${r.statusText}`);
-      const ab = await r.arrayBuffer();
-      fileBuffer = Buffer.from(ab);
-    } else if (ct.includes("multipart/form-data")) {
-      // Multipart: file + instruction (+ optional filename)
-      ({ fileBuffer, filename, instruction } = await readMultipart(req));
-      if (!fileBuffer) {
-        return res.status(400).json({ ok: false, message: "No file received" });
-      }
-    } else {
-      return res.status(400).json({
-        ok: false,
-        message: "Unsupported Content-Type. Use JSON or multipart/form-data.",
-      });
+    const { fileUrl, fileBase64, filename = "document.pdf", text, instruction } = body || {};
+    if (!fileUrl && !fileBase64 && !text) {
+      return badRequest(res, "Provide one of: fileUrl, fileBase64+filename, or text");
     }
 
-    // ---------- extract text (PDF first; fallback to plain text) ----------
-    let text = "";
-    try {
-      const parsed = await pdf(fileBuffer); // works great for PDFs
-      text = (parsed.text || "").trim();
-    } catch (_) {
-      // Not a PDF? try as UTF-8 text (best effort)
-      text = fileBuffer.toString("utf8");
+    let docText = "";
+    if (text?.trim()) {
+      docText = text.trim();
+    } else if (fileBase64) {
+      const buf = Buffer.from(fileBase64, "base64");
+      docText = await extractTextFromBuffer(buf, filename);
+      if (!docText) return badRequest(res, "Could not extract text from base64 file");
+    } else if (fileUrl) {
+      const buf = await fetchArrayBufferFromUrl(fileUrl);
+      const guessed = filename || (new URL(fileUrl).pathname.split("/").pop() || "document.pdf");
+      docText = await extractTextFromBuffer(buf, guessed);
+      if (!docText) return badRequest(res, "Could not extract text from fileUrl");
     }
 
-    if (!text) throw new Error("Could not extract any text from the document");
-
-    const DEFAULT_INSTRUCTION =
-      `Summarize the document overall for a general business audience.
-Include a short executive summary, 3–7 bullet highlights, and any key risks/next steps.
-Be concise and objective.`;
-
-    const fullPrompt =
-      `${DEFAULT_INSTRUCTION}\n\n` +
-      `User instruction: ${instruction || "(none)"}\n\n` +
-      `---\n` +
-      `Document content (truncated if long):\n` +
-      `${text.slice(0, 150000)}\n` + // guard token size
-      `---`;
-
-    // ---------- call OpenAI ----------
-    const resp = await openai.responses.create({
-      model: "gpt-4o-mini",
-      input: fullPrompt,
-    });
-
-    const summary =
-      resp.output_text ??
-      (resp.output?.[0]?.content?.[0]?.text ?? JSON.stringify(resp, null, 2));
-
-    return res.status(200).json({ ok: true, filename, summary });
-  } catch (err) {
-    console.error("analyze error:", err);
-    setCors(res); // ensure headers on error
-    return res
-      .status(500)
-      .json({ ok: false, message: err?.message || "Server error" });
+    const summary = await summarizeText(docText, instruction);
+    res.statusCode = 200;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ ok: true, filename, summary }));
+  } catch (e) {
+    return serverError(res, e);
   }
 }
