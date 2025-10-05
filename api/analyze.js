@@ -1,106 +1,151 @@
-// pages/api/analyze-upload.js
+// api/analyze.js
+// Node runtime + no default bodyParser so we can accept multipart uploads.
+export const config = { api: { bodyParser: false } };
+
 import OpenAI from "openai";
-import formidable from "formidable";
-import { promises as fs } from "fs";
+import Busboy from "busboy";
 import pdf from "pdf-parse";
 
-export const config = {
-  api: { bodyParser: false }, // allow formidable to handle multipart
-};
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
+// ---------- CORS helpers ----------
 function setCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*"); // or your domain
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  // In production, you can replace '*' with your Wix site origin for tighter security.
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+// ---------- small utilities ----------
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(data || "{}"));
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function readMultipart(req) {
+  return new Promise((resolve, reject) => {
+    const bb = Busboy({ headers: req.headers });
+    let fileBuffer = null;
+    let filename = "";
+    let instruction = "";
+
+    bb.on("file", (name, file, info) => {
+      const chunks = [];
+      filename = info?.filename || "document";
+      file.on("data", (d) => chunks.push(d));
+      file.on("end", () => (fileBuffer = Buffer.concat(chunks)));
+    });
+
+    bb.on("field", (name, val) => {
+      if (name === "instruction") instruction = String(val || "");
+      if (name === "filename" && !filename) filename = String(val || "");
+    });
+
+    bb.on("error", reject);
+    bb.on("finish", () => resolve({ fileBuffer, filename, instruction }));
+    req.pipe(bb);
+  });
+}
+
+// ---------- OpenAI client ----------
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+// ---------- main handler ----------
 export default async function handler(req, res) {
   setCors(res);
-  if (req.method === "OPTIONS") return res.status(200).end();
+
+  // CORS preflight
+  if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
   try {
-    // Parse multipart form
-    const { fields, files } = await new Promise((resolve, reject) => {
-      const form = formidable({ multiples: false, keepExtensions: true });
-      form.parse(req, (err, fields, files) => {
-        if (err) reject(err);
-        else resolve({ fields, files });
-      });
-    });
+    const ct = req.headers["content-type"] || "";
+    let fileBuffer = null;
+    let filename = "document";
+    let instruction = "";
 
-    const file =
-      files.file ||
-      files.upload ||
-      (files && Object.values(files)[0]); // accept any field name
+    if (ct.includes("application/json")) {
+      // JSON: { fileUrl, filename?, instruction? }
+      const body = await readJson(req);
+      if (!body?.fileUrl) {
+        return res
+          .status(400)
+          .json({ ok: false, message: "Missing 'fileUrl' in JSON body" });
+      }
 
-    if (!file) {
-      return res
-        .status(400)
-        .json({ ok: false, message: "No file uploaded." });
-    }
-
-    const buffer = await fs.readFile(file.filepath);
-
-    // Extract text (PDF or plain text)
-    let text = "";
-    const name = file.originalFilename || "document";
-    const type = file.mimetype || "";
-
-    if (type.includes("pdf") || name.toLowerCase().endsWith(".pdf")) {
-      const parsed = await pdf(buffer);
-      text = parsed.text || "";
+      filename = body.filename || filename;
+      instruction = body.instruction || "";
+      const r = await fetch(body.fileUrl);
+      if (!r.ok) throw new Error(`Download failed: ${r.status} ${r.statusText}`);
+      const ab = await r.arrayBuffer();
+      fileBuffer = Buffer.from(ab);
+    } else if (ct.includes("multipart/form-data")) {
+      // Multipart: file + instruction (+ optional filename)
+      ({ fileBuffer, filename, instruction } = await readMultipart(req));
+      if (!fileBuffer) {
+        return res.status(400).json({ ok: false, message: "No file received" });
+      }
     } else {
-      // try UTF-8 text
-      text = buffer.toString("utf8");
-    }
-
-    if (!text || text.trim().length === 0) {
       return res.status(400).json({
         ok: false,
-        message:
-          "Could not extract text. Please upload a PDF or a text-based file.",
+        message: "Unsupported Content-Type. Use JSON or multipart/form-data.",
       });
     }
 
-    // keep token usage reasonable
-    const MAX_CHARS = 15000;
-    const clipped = text.slice(0, MAX_CHARS);
+    // ---------- extract text (PDF first; fallback to plain text) ----------
+    let text = "";
+    try {
+      const parsed = await pdf(fileBuffer); // works great for PDFs
+      text = (parsed.text || "").trim();
+    } catch (_) {
+      // Not a PDF? try as UTF-8 text (best effort)
+      text = fileBuffer.toString("utf8");
+    }
 
-    const extra =
-      (fields.instruction || "Summarize the document overall for a business audience").toString();
+    if (!text) throw new Error("Could not extract any text from the document");
 
-    const system =
-      "You are a helpful business analyst. Write a concise executive summary with key bullet highlights and any risks/next steps.";
-    const user = `${extra}\n\n---\n${clipped}`;
+    const DEFAULT_INSTRUCTION =
+      `Summarize the document overall for a general business audience.
+Include a short executive summary, 3–7 bullet highlights, and any key risks/next steps.
+Be concise and objective.`;
 
-    const completion = await openai.chat.completions.create({
+    const fullPrompt =
+      `${DEFAULT_INSTRUCTION}\n\n` +
+      `User instruction: ${instruction || "(none)"}\n\n` +
+      `---\n` +
+      `Document content (truncated if long):\n` +
+      `${text.slice(0, 150000)}\n` + // guard token size
+      `---`;
+
+    // ---------- call OpenAI ----------
+    const resp = await openai.responses.create({
       model: "gpt-4o-mini",
-      temperature: 0.2,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
+      input: fullPrompt,
     });
 
     const summary =
-      completion.choices?.[0]?.message?.content?.trim() ||
-      "No summary generated.";
+      resp.output_text ??
+      (resp.output?.[0]?.content?.[0]?.text ?? JSON.stringify(resp, null, 2));
 
-    return res.status(200).json({
-      ok: true,
-      filename: name,
-      summary,
-    });
+    return res.status(200).json({ ok: true, filename, summary });
   } catch (err) {
-    console.error("analyze-upload error:", err);
-    return res.status(500).json({
-      ok: false,
-      message: err?.message || "Server error",
-    });
+    console.error("analyze error:", err);
+    setCors(res); // ensure headers on error
+    return res
+      .status(500)
+      .json({ ok: false, message: err?.message || "Server error" });
   }
 }
