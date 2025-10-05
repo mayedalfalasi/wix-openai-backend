@@ -1,79 +1,79 @@
-// pages/api/analyze.js
+// /api/analyze.js
 import OpenAI from "openai";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// ---- CORS helper (so Wix/fetch works cleanly) ----
+const cors = (res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+};
 
-const DEFAULT_INSTRUCTION =
-  "Summarize the document overall for a general business audience. " +
-  "Include a short executive summary, 3–7 bullet highlights, and any key risks/next steps. " +
-  "Be concise and objective.";
+// ---- Default summarization instruction you wanted ----
+const DEFAULT_INSTRUCTION = `
+Summarize the document overall for a general business audience.
+Include a short executive summary, 3–7 bullet highlights, and any key risks/next steps.
+Be concise and objective.
+`;
 
 function buildInstruction(userInstruction) {
   const ui = (userInstruction || "").trim();
-  return ui ? `${DEFAULT_INSTRUCTION}\n\nUser instruction: ${ui}` : DEFAULT_INSTRUCTION;
-}
-
-async function fetchBuffer(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`Failed to fetch file: ${r.status} ${await r.text()}`);
-  return Buffer.from(await r.arrayBuffer());
+  return ui
+    ? `${DEFAULT_INSTRUCTION}\n\nUser instruction: ${ui}`
+    : DEFAULT_INSTRUCTION;
 }
 
 export default async function handler(req, res) {
+  cors(res);
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
-    if (req.method !== "POST") {
-      res.setHeader("Allow", ["POST"]);
-      return res.status(405).json({ ok: false, message: "Method not allowed" });
+    // Expecting JSON: { fileUrl, filename?, instruction? }
+    const { fileUrl, filename, instruction } = req.body || {};
+
+    if (!fileUrl) {
+      return res.status(400).json({ error: "Missing 'fileUrl' in body." });
     }
 
-    const contentType = req.headers["content-type"] || "";
-    let fileBuffer = null;
-    let filename = "document";
-    let userInstruction = "";
-
-    if (contentType.includes("application/json")) {
-      const body = req.body || {};
-      if (body.fileUrl) {
-        fileBuffer = await fetchBuffer(body.fileUrl);
-        filename = body.filename || "document";
-      } else {
-        throw new Error('Missing "fileUrl" in JSON body');
-      }
-      userInstruction = body.instruction || "";
-    } else {
-      throw new Error("Unsupported Content-Type. Use JSON with {fileUrl}.");
-    }
-
-    if (!fileBuffer) throw new Error("No file bytes were received.");
-
-    const uploaded = await openai.files.create({
-      file: new Blob([fileBuffer]),
-      purpose: "assistants",
-      filename,
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
     });
 
-    const finalInstruction = buildInstruction(userInstruction);
+    const prompt = buildInstruction(instruction);
 
-    const response = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: [
+    // Ask the model to summarize using the URL (model can fetch/interpret web docs if enabled)
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0.3,
+      messages: [
+        { role: "system", content: "You are a precise business summarizer." },
         {
           role: "user",
-          content: [{ type: "input_text", text: finalInstruction }],
+          content: `Please summarize this document: ${fileUrl}\n\n${prompt}`,
         },
       ],
-      attachments: [{ file_id: uploaded.id, tools: [{ type: "file_search" }] }],
     });
 
-    const text =
-      response.output_text ||
-      (Array.isArray(response.output)
-        ? response.output.map((p) => p.content?.[0]?.text).join("\n")
-        : "") ||
-      "No summary was returned.";
+    const summary =
+      completion?.choices?.[0]?.message?.content?.trim() ||
+      "No summary returned.";
 
-    res.status(200).json({ ok: true, filename, summary: text, model: response.model });
+    return res.status(200).json({
+      ok: true,
+      filename: filename || null,
+      summary,
+    });
   } catch (err) {
-    res.status(400).json({ ok: false, message: err?.message || String(err) });
+    console.error("Analyze error:", err);
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || "Internal server error",
+    });
   }
 }
