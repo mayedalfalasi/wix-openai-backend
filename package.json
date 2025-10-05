@@ -1,9 +1,10 @@
 {
   "name": "wix-openai-backend",
-  "version": "1.0.0",
   "private": true,
+  "type": "module",
   "dependencies": {
     "openai": "^4.57.0",
+    "busboy": "^1.6.0",
     "pdf-parse": "^1.1.1"
   }
 }
