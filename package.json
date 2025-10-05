@@ -1,7 +1,12 @@
 {
   "name": "wix-openai-backend",
   "version": "1.0.0",
+  "private": true,
   "type": "commonjs",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node api/ping.js"
+  },
   "dependencies": {
     "formidable": "^3.5.4",
     "pdf-parse": "^1.1.1"
