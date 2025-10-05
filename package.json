@@ -1,0 +1,10 @@
+{
+  "name": "wix-openai-backend",
+  "version": "1.0.0",
+  "description": "Vercel serverless API + simple upload UI for document analysis",
+  "license": "ISC",
+  "dependencies": {
+    "busboy": "^1.6.0",
+    "openai": "^4.60.0"
+  }
+}
