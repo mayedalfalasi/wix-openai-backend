@@ -1,5 +1,4 @@
-// Vercel serverless download endpoint
-// Works inside Wix by returning Content-Disposition: attachment
+// api/download.js
 module.exports = async (req, res) => {
   try {
     const isJson = (req.headers['content-type'] || '').includes('application/json');
@@ -29,9 +28,7 @@ module.exports = async (req, res) => {
       return res.status(405).end('Method Not Allowed');
     }
 
-    // sanitize filename
     filename = filename.replace(/[^\w.\-]/g, '_') || 'analysis.txt';
-
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.status(200).send(text ?? '');
