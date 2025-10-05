@@ -1,94 +1,60 @@
-// /api/analyze.js
+// pages/api/analyze.js
 import OpenAI from "openai";
-import pdfParse from "pdf-parse";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const DEFAULT_INSTRUCTION =
-  "Summarize the document overall for a general business audience. " +
-  "Include a short executive summary, 3–7 bullet highlights, and any key risks/next steps. " +
-  "Be concise and objective.";
-
-// Build the final instruction: default + user add-on (if any)
-function buildInstruction(userInstruction) {
-  const ui = (userInstruction || "").trim();
-  return ui ? `${DEFAULT_INSTRUCTION}\n\nUser instruction: ${ui}` : DEFAULT_INSTRUCTION;
-}
-
-// Download the file (PDF) into a Buffer
-async function fetchFileBuffer(url) {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to download file: ${res.status} ${res.statusText}`);
-  }
-  const arrayBuffer = await res.arrayBuffer();
-  return Buffer.from(arrayBuffer);
-}
-
-// Extract text from PDF using pdf-parse
-async function extractTextFromPdf(buffer) {
-  const parsed = await pdfParse(buffer);
-  // pdfParse returns { text, info, metadata, numpages, version }
-  return (parsed.text || "").trim();
-}
-
-// Create an OpenAI summary from text content
-async function summarizeText({ text, instruction }) {
-  const prompt = [
-    `You are a business analyst. Summarize the document for a general business audience.`,
-    `Instruction: ${instruction}`,
-    `---`,
-    `Document text (may be partial):`,
-    text.slice(0, 12000) // keep within token limits
-  ].join("\n\n");
-
-  const resp = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    messages: [
-      { role: "system", content: "You summarize business documents clearly and concisely." },
-      { role: "user", content: prompt }
-    ],
-    temperature: 0.2
-  });
-
-  const out = resp.choices?.[0]?.message?.content?.trim();
-  return out || "No summary produced.";
-}
+// If your handler needs other imports or helpers, add them above.
 
 export default async function handler(req, res) {
+  // ---- CORS headers ----
+  res.setHeader("Access-Control-Allow-Origin", "*");               // or restrict to your site
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") {
+    return res.status(200).end(); // preflight OK
+  }
+  // ----------------------
+
   try {
     if (req.method !== "POST") {
-      res.status(405).json({ ok: false, message: "Method not allowed" });
-      return;
+      return res.status(405).json({ ok: false, message: "Method not allowed" });
     }
 
-    const { fileUrl, filename, instruction } = req.body || {};
+    const { fileUrl, filename = "document", instruction = "" } =
+      typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+
     if (!fileUrl) {
-      res.status(400).json({ ok: false, message: "Missing fileUrl" });
-      return;
+      return res
+        .status(400)
+        .json({ ok: false, message: "Missing fileUrl in request body." });
     }
 
-    const finalInstruction = buildInstruction(instruction);
+    // ------- your existing analysis logic ----------
+    // Example: ask OpenAI to summarize the URL (you likely already have something similar).
+    const system = `You are a helpful business analyst. Summarize clearly and concisely.`;
+    const user = `Summarize this document for a general business audience.
+URL: ${fileUrl}
+Extra instruction: ${instruction}`;
 
-    // 1) Download file
-    const fileBuffer = await fetchFileBuffer(fileUrl);
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.2,
+    });
 
-    // 2) Try to parse as PDF
-    // (If you want to support DOCX/others later, branch here by file extension or content-type)
-    const text = await extractTextFromPdf(fileBuffer);
-    if (!text) {
-      throw new Error("Could not extract text from the PDF (empty text).");
-    }
+    const summary =
+      completion.choices?.[0]?.message?.content?.trim() ||
+      "No summary generated.";
 
-    // 3) Summarize with OpenAI
-    const summary = await summarizeText({ text, instruction: finalInstruction });
-
-    res.status(200).json({ ok: true, filename: filename || "document.pdf", summary });
+    return res.status(200).json({ ok: true, filename, summary });
   } catch (err) {
     console.error("analyze error:", err);
-    res.status(500).json({
+    return res.status(500).json({
       ok: false,
-      message: err?.message || "Server error"
+      message: err?.message || "Server error",
     });
   }
 }
