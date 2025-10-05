@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import pdf from "pdf-parse";
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 const ALLOW_ORIGIN = process.env.ALLOW_ORIGIN || "*";
@@ -18,7 +17,7 @@ function badRequest(res, message, extra = {}) {
 }
 
 function serverError(res, e, extra = {}) {
-  console.error("ERROR /api/analyze:", e);
+  console.error("[/api/analyze] ERROR:", e?.stack || e);
   res.statusCode = 500;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify({ ok: false, error: e?.message || "Server error", ...extra }));
@@ -33,22 +32,28 @@ async function fetchArrayBufferFromUrl(url) {
 
 async function extractTextFromBuffer(buf, filename = "") {
   const lower = (filename || "").toLowerCase();
+
   if (lower.endsWith(".pdf")) {
+    // Lazy import to avoid cold-start/bundler crashes
+    const { default: pdf } = await import("pdf-parse");
     const data = await pdf(buf);
     return data.text || "";
   }
+
   if (lower.endsWith(".txt")) return buf.toString("utf8");
+
+  // Best-effort fallback for unknown types
   try { return buf.toString("utf8"); } catch { return ""; }
 }
 
-function createOpenAI() {
+function createOpenAIOrThrow() {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
   return new OpenAI({ apiKey });
 }
 
 async function summarizeText(text, instruction) {
-  const openai = createOpenAI();
+  const openai = createOpenAIOrThrow();
   const system =
     "You are BizDoc, a precise business-document assistant. Summarize for a general business audience. Be concise and objective. Prefer bullet lists for highlights.";
   const userPrompt = [
@@ -77,7 +82,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return badRequest(res, "Use POST");
 
-  // Read raw body then parse JSON (Vercel req may not be pre-parsed)
+  // Read raw body then parse JSON
   let body;
   try {
     const raw = await new Promise((resolve, reject) => {
