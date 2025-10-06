@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>PDF Button Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- marker: PDF-BUTTON-TEST v1 -->
+</head>
+<body style="font-family:system-ui,Arial;margin:24px">
+  <h2>PDF Button Test (should see TWO buttons)</h2>
+  <p>If you see only one or none, your static files aren’t the ones Vercel is serving.</p>
+
+  <textarea id="out" rows="8" style="width:100%">Sample analysis text…</textarea>
+
+  <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+    <input id="filename" value="analysis" style="min-width:220px">
+    <button id="downloadTxtBtn">Download .txt</button>
+    <button id="downloadPdfBtn">Download PDF</button>
+    <span id="status2" style="align-self:center;color:#666"></span>
+  </div>
+
+  <script>
+    function ensureExt(name, ext){
+      name=(name||("analysis."+ext)).trim().replace(/[^\w.\-]/g,"_");
+      if(!new RegExp("\\."+ext+"$","i").test(name)) name += "."+ext;
+      return name;
+    }
+
+    document.getElementById("downloadTxtBtn").addEventListener("click",()=>{
+      const text=document.getElementById("out").value||"";
+      const filename=ensureExt(document.getElementById("filename").value,"txt");
+      if(!text.trim()){ document.getElementById("status2").textContent="Add text first."; return; }
+      const form=document.createElement("form");
+      form.method="POST"; form.action="/api/download"; form.target="_self"; form.style.display="none";
+      const f1=document.createElement("input"); f1.name="filename"; f1.value=filename; form.appendChild(f1);
+      const f2=document.createElement("textarea"); f2.name="text"; f2.value=text; form.appendChild(f2);
+      document.body.appendChild(form); form.submit(); form.remove();
+    });
+
+    document.getElementById("downloadPdfBtn").addEventListener("click",()=>{
+      const text=document.getElementById("out").value||"";
+      const filename=ensureExt(document.getElementById("filename").value,"pdf");
+      if(!text.trim()){ document.getElementById("status2").textContent="Add text first."; return; }
+      const form=document.createElement("form");
+      form.method="POST"; form.action="/api/download-pdf"; form.target="_self"; form.style.display="none";
+      const f1=document.createElement("input"); f1.name="filename"; f1.value=filename; form.appendChild(f1);
+      const f2=document.createElement("textarea"); f2.name="text"; f2.value=text; form.appendChild(f2);
+      document.body.appendChild(form); form.submit(); form.remove();
+    });
+  </script>
+</body>
+</html>
