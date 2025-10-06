@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>AI Document Analyzer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- marker: DOWNLOAD_PDF_BUTTON v42 -->
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, Arial, Segoe UI; margin: 24px; color: #111; }
@@ -20,12 +21,14 @@
     button { padding:10px 16px; border:0; border-radius:10px; background:#111; color:#fff; cursor:pointer; }
     button.secondary { background:#e9e9e9; color:#111; }
     #status, #status2 { color:#666; }
+    .build { font-size:12px; color:#888; margin-top:8px }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>AI Document Analyzer</h1>
     <p class="sub">Upload a file, add instructions, get an AI summary, and download the result (.txt or PDF).</p>
+    <div class="build">Build: <strong>PDF-ON</strong> (v42)</div>
 
     <!-- Upload -->
     <label>Upload file</label>
@@ -71,7 +74,8 @@
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
       const file = document.getElementById("file").files?.[0];
       const out = document.getElementById("out");
-      const instruction = (document.getElementById("instruction").value || "").trim() || "Summarize this document for a business audience.";
+      const instruction = (document.getElementById("instruction").value || "").trim()
+        || "Summarize this document for a business audience.";
 
       if (!file) { out.value = "Pick a file first."; return; }
       if (file.size > MAX_MB * 1024 * 1024) { out.value = `File too large (max ${MAX_MB} MB).`; return; }
