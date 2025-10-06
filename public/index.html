@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>AI Document Analyzer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- marker: INDEX WITH PDF BUTTON v100 -->
+  <!-- MARKER: INDEX PDF-LIVE v103 -->
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, Arial, Segoe UI; margin: 24px; color: #111; }
@@ -25,22 +25,28 @@
 <body>
   <div class="wrap">
     <h1>AI Document Analyzer</h1>
-    <p class="sub">Upload a file, add instructions, get an AI summary, and download as .txt or PDF.</p>
+    <p class="sub">Upload a file, add instructions, get an AI summary, and download the result as <strong>.txt</strong> or <strong>PDF</strong>.</p>
 
+    <!-- Upload -->
     <label>Upload file</label>
-    <input id="file" type="file" accept=".txt,.md,.csv,.json,.log,.pdf,.doc,.docx,.rtf,.xls,.xlsx,.ppt,.pptx,.html,.xml,.yaml,.yml" />
+    <input id="file" type="file"
+           accept=".txt,.md,.csv,.json,.log,.pdf,.doc,.docx,.rtf,.xls,.xlsx,.ppt,.pptx,.html,.xml,.yaml,.yml" />
 
+    <!-- Instructions -->
     <label>Extra instructions (optional)</label>
     <textarea id="instruction" rows="5" placeholder="e.g. Executive summary, action items with owners and due dates…"></textarea>
 
+    <!-- Analyze -->
     <div class="row">
       <button id="analyzeBtn">Analyze</button>
       <span id="status"></span>
     </div>
 
+    <!-- Result -->
     <label style="margin-top:18px;">Result</label>
     <textarea id="out" rows="14" placeholder="Results will appear here…"></textarea>
 
+    <!-- Downloads -->
     <div class="row" style="margin-top:14px;">
       <input id="filename" type="text" value="analysis" style="min-width:220px" />
       <button id="downloadTxtBtn" class="secondary">Download .txt</button>
@@ -50,6 +56,7 @@
   </div>
 
   <script>
+    // ------------ Config / helpers ------------
     const API_URL = "/api/analyze";
     const MAX_MB = 20;
 
@@ -59,6 +66,7 @@
       return name;
     }
 
+    // ------------ Analyze ------------
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
       const file = document.getElementById("file").files?.[0];
       const out = document.getElementById("out");
@@ -89,30 +97,50 @@
       }
     });
 
-    // TXT download
+    // ------------ Download .txt (server POST; same tab) ------------
     document.getElementById("downloadTxtBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "txt");
       if (!text.trim()) { document.getElementById("status2").textContent = "Analyze something first."; return; }
 
       const form = document.createElement("form");
-      form.method = "POST"; form.action = "/api/download"; form.target = "_self"; form.style.display = "none";
-      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
-      document.body.appendChild(form); form.submit(); form.remove();
+      form.method = "POST";
+      form.action = "/api/download";
+      form.target = "_self";       // same tab avoids popup/sandbox issues
+      form.style.display = "none";
+
+      const f1 = document.createElement("input");
+      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+
+      const f2 = document.createElement("textarea");
+      f2.name = "text"; f2.value = text; form.appendChild(f2);
+
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
     });
 
-    // PDF download
+    // ------------ Download PDF (server POST; same tab) ------------
     document.getElementById("downloadPdfBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "pdf");
       if (!text.trim()) { document.getElementById("status2").textContent = "Analyze something first."; return; }
 
       const form = document.createElement("form");
-      form.method = "POST"; form.action = "/api/download-pdf"; form.target = "_self"; form.style.display = "none";
-      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
-      document.body.appendChild(form); form.submit(); form.remove();
+      form.method = "POST";
+      form.action = "/api/download-pdf";
+      form.target = "_self";       // same tab avoids popup/sandbox issues
+      form.style.display = "none";
+
+      const f1 = document.createElement("input");
+      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+
+      const f2 = document.createElement("textarea");
+      f2.name = "text"; f2.value = text; form.appendChild(f2);
+
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
     });
   </script>
 </body>
