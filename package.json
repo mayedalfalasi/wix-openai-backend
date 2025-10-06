@@ -5,6 +5,7 @@
   "license": "ISC",
   "dependencies": {
     "busboy": "^1.6.0",
-    "openai": "^4.60.0"
+    "openai": "^4.60.0",
+    "pdfkit": "^0.15.0"
   }
 }
