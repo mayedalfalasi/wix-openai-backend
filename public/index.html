@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>AI Document Analyzer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- MARKER: INDEX PDF-LIVE v103 -->
+  <!-- MARKER: INDEX BRIDGED v3 -->
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, Arial, Segoe UI; margin: 24px; color: #111; }
@@ -25,7 +25,7 @@
 <body>
   <div class="wrap">
     <h1>AI Document Analyzer</h1>
-    <p class="sub">Upload a file, add instructions, get an AI summary, and download the result as <strong>.txt</strong> or <strong>PDF</strong>.</p>
+    <p class="sub">Upload a file, add instructions, get an AI summary, and download as .txt or PDF.</p>
 
     <!-- Upload -->
     <label>Upload file</label>
@@ -56,7 +56,7 @@
   </div>
 
   <script>
-    // ------------ Config / helpers ------------
+    // -------- Config/helpers --------
     const API_URL = "/api/analyze";
     const MAX_MB = 20;
 
@@ -66,7 +66,15 @@
       return name;
     }
 
-    // ------------ Analyze ------------
+    // Detect if we are inside Wix (iframe) and bridge to parent
+    function inIframe(){ try { return window.self !== window.top; } catch(e){ return true; } }
+    function postToParent(type, payload){
+      if (!inIframe()) return false;               // not embedded → no bridge needed
+      window.parent.postMessage({ source:"vercel-analyzer", type, payload }, "*");
+      return true;
+    }
+
+    // -------- Analyze --------
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
       const file = document.getElementById("file").files?.[0];
       const out = document.getElementById("out");
@@ -97,50 +105,38 @@
       }
     });
 
-    // ------------ Download .txt (server POST; same tab) ------------
+    // ======= UPDATED: bridged download handlers (Wix-safe) =======
+
+    // TXT download (bridged)
     document.getElementById("downloadTxtBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "txt");
       if (!text.trim()) { document.getElementById("status2").textContent = "Analyze something first."; return; }
 
+      // If embedded in Wix, ask parent to download; otherwise do normal form POST
+      if (postToParent("DOWNLOAD_TXT", { filename, text })) return;
+
       const form = document.createElement("form");
-      form.method = "POST";
-      form.action = "/api/download";
-      form.target = "_self";       // same tab avoids popup/sandbox issues
-      form.style.display = "none";
-
-      const f1 = document.createElement("input");
-      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-
-      const f2 = document.createElement("textarea");
-      f2.name = "text"; f2.value = text; form.appendChild(f2);
-
-      document.body.appendChild(form);
-      form.submit();
-      form.remove();
+      form.method = "POST"; form.action = "/api/download"; form.target = "_self"; form.style.display = "none";
+      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
+      document.body.appendChild(form); form.submit(); form.remove();
     });
 
-    // ------------ Download PDF (server POST; same tab) ------------
+    // PDF download (bridged)
     document.getElementById("downloadPdfBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "pdf");
       if (!text.trim()) { document.getElementById("status2").textContent = "Analyze something first."; return; }
 
+      // If embedded in Wix, ask parent to download; otherwise do normal form POST
+      if (postToParent("DOWNLOAD_PDF", { filename, text })) return;
+
       const form = document.createElement("form");
-      form.method = "POST";
-      form.action = "/api/download-pdf";
-      form.target = "_self";       // same tab avoids popup/sandbox issues
-      form.style.display = "none";
-
-      const f1 = document.createElement("input");
-      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-
-      const f2 = document.createElement("textarea");
-      f2.name = "text"; f2.value = text; form.appendChild(f2);
-
-      document.body.appendChild(form);
-      form.submit();
-      form.remove();
+      form.method = "POST"; form.action = "/api/download-pdf"; form.target = "_self"; form.style.display = "none";
+      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
+      document.body.appendChild(form); form.submit(); form.remove();
     });
   </script>
 </body>
