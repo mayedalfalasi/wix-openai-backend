@@ -27,10 +27,12 @@
     <h1>AI Document Analyzer</h1>
     <p class="sub">Upload a file, add instructions, get an AI summary, and download the result (.txt or PDF).</p>
 
+    <!-- Upload -->
     <label>Upload file</label>
     <input id="file" type="file"
            accept=".txt,.md,.csv,.json,.log,.pdf,.doc,.docx,.rtf,.xls,.xlsx,.ppt,.pptx,.html,.xml,.yaml,.yml" />
 
+    <!-- Quick template -->
     <label>Quick template (optional)</label>
     <div class="row">
       <select id="template" style="flex:1 1 280px;">
@@ -45,6 +47,7 @@
       <button id="addTemplate" class="secondary">Add to instructions</button>
     </div>
 
+    <!-- Options -->
     <label>Analysis options</label>
     <div class="grid">
       <label><input type="checkbox" class="opt" value="Summarize key points"> Summarize key points</label>
@@ -55,17 +58,21 @@
       <label><input type="checkbox" class="opt" value="Write a client-facing brief in a friendly, professional tone"> Client brief</label>
     </div>
 
+    <!-- Instructions -->
     <label>Extra instructions (optional)</label>
     <textarea id="instruction" rows="5" placeholder="Any custom prompts, business context, or specific questions…"></textarea>
 
+    <!-- Analyze -->
     <div class="row">
       <button id="analyzeBtn">Analyze</button>
       <span id="status"></span>
     </div>
 
+    <!-- Result -->
     <label style="margin-top:18px;">Result</label>
     <textarea id="out" rows="14" placeholder="Results will appear here…"></textarea>
 
+    <!-- Downloads -->
     <div class="row" style="margin-top:14px;">
       <input id="filename" type="text" value="analysis" style="min-width:220px" />
       <button id="downloadTxtBtn" class="secondary">Download .txt</button>
@@ -75,6 +82,7 @@
   </div>
 
   <script>
+    // ========= Config / helpers =========
     const API_URL = "/api/analyze";
     const MAX_MB = 20;
     const $ = (s) => document.querySelector(s);
@@ -83,17 +91,19 @@
     function ensureExt(name, ext) {
       name = (name || ("analysis." + ext)).trim();
       name = name.replace(/[^\w.\-]/g, "_");
-      if (!new RegExp("\\\\." + ext + "$", "i").test(name)) name += "." + ext;
+      if (!new RegExp("\\." + ext + "$", "i").test(name)) name += "." + ext;
       return name;
     }
 
+    // ========= UI wiring =========
     $("#addTemplate").addEventListener("click", () => {
       const t = $("#template").value;
       if (!t) return;
       const box = $("#instruction");
-      box.value = (box.value + (box.value ? "\\n" : "") + t).trim();
+      box.value = (box.value + (box.value ? "\n" : "") + t).trim();
     });
 
+    // Analyze
     $("#analyzeBtn").addEventListener("click", async () => {
       const file = $("#file").files?.[0];
       const out = $("#out");
@@ -103,10 +113,10 @@
       const parts = [];
       if (selected.length) {
         parts.push("Perform the following analyses:");
-        parts.push(" - " + selected.join("\\n - "));
+        parts.push(" - " + selected.join("\n - "));
       }
-      if (custom) parts.push("\\nAdditional instructions:\\n" + custom);
-      const instruction = (parts.join("\\n").trim() || "Summarize the document overall.");
+      if (custom) parts.push("\nAdditional instructions:\n" + custom);
+      const instruction = (parts.join("\n").trim() || "Summarize the document overall.");
 
       if (!file) { out.value = "Pick a file first."; return; }
       if (file.size > MAX_MB * 1024 * 1024) { out.value = "File too large (max " + MAX_MB + " MB)."; return; }
@@ -132,7 +142,7 @@
       }
     });
 
-    // TXT download (server POST; same tab for Wix)
+    // ========= Download .txt (server POST; same tab works when opened from Wix) =========
     document.getElementById("downloadTxtBtn").addEventListener("click", () => {
       const text = $("#out").value || "";
       const filename = ensureExt($("#filename").value, "txt");
@@ -141,14 +151,21 @@
       const form = document.createElement("form");
       form.method = "POST";
       form.action = "/api/download";
-      form.target = "_self";
+      form.target = "_self";       // same tab to avoid popup/sandbox issues
       form.style.display = "none";
-      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
-      document.body.appendChild(form); form.submit(); form.remove();
+
+      const f1 = document.createElement("input");
+      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+
+      const f2 = document.createElement("textarea");
+      f2.name = "text"; f2.value = text; form.appendChild(f2);
+
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
     });
 
-    // PDF download (server POST; same tab for Wix)
+    // ========= Download PDF (server POST; same tab) =========
     document.getElementById("downloadPdfBtn").addEventListener("click", () => {
       const text = $("#out").value || "";
       const filename = ensureExt($("#filename").value, "pdf");
@@ -159,9 +176,16 @@
       form.action = "/api/download-pdf";
       form.target = "_self";
       form.style.display = "none";
-      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
-      document.body.appendChild(form); form.submit(); form.remove();
+
+      const f1 = document.createElement("input");
+      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+
+      const f2 = document.createElement("textarea");
+      f2.name = "text"; f2.value = text; form.appendChild(f2);
+
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
     });
   </script>
 </body>
