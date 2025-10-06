@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <title>AI Document Analyzer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- marker: DOWNLOAD_PDF_BUTTON v42 -->
+  <!-- MARKER: INDEX PDF-LIVE v103 -->
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, Arial, Segoe UI; margin: 24px; color: #111; }
@@ -16,19 +16,16 @@
       width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 10px; background: #fff;
     }
     textarea { font-family: ui-monospace, Consolas; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 10px; }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:14px; }
     button { padding:10px 16px; border:0; border-radius:10px; background:#111; color:#fff; cursor:pointer; }
     button.secondary { background:#e9e9e9; color:#111; }
     #status, #status2 { color:#666; }
-    .build { font-size:12px; color:#888; margin-top:8px }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>AI Document Analyzer</h1>
-    <p class="sub">Upload a file, add instructions, get an AI summary, and download the result (.txt or PDF).</p>
-    <div class="build">Build: <strong>PDF-ON</strong> (v42)</div>
+    <p class="sub">Upload a file, add instructions, get an AI summary, and download the result as <strong>.txt</strong> or <strong>PDF</strong>.</p>
 
     <!-- Upload -->
     <label>Upload file</label>
@@ -59,18 +56,17 @@
   </div>
 
   <script>
-    // -------- Config/helpers --------
+    // ------------ Config / helpers ------------
     const API_URL = "/api/analyze";
     const MAX_MB = 20;
 
     function ensureExt(name, ext) {
-      name = (name || ("analysis." + ext)).trim();
-      name = name.replace(/[^\w.\-]/g, "_");
+      name = (name || ("analysis." + ext)).trim().replace(/[^\w.\-]/g, "_");
       if (!new RegExp("\\." + ext + "$", "i").test(name)) name += "." + ext;
       return name;
     }
 
-    // -------- Analyze --------
+    // ------------ Analyze ------------
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
       const file = document.getElementById("file").files?.[0];
       const out = document.getElementById("out");
@@ -101,7 +97,7 @@
       }
     });
 
-    // -------- Download .txt (server POST; same tab) --------
+    // ------------ Download .txt (server POST; same tab) ------------
     document.getElementById("downloadTxtBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "txt");
@@ -110,16 +106,21 @@
       const form = document.createElement("form");
       form.method = "POST";
       form.action = "/api/download";
-      form.target = "_self";
+      form.target = "_self";       // same tab avoids popup/sandbox issues
       form.style.display = "none";
 
-      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
+      const f1 = document.createElement("input");
+      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
 
-      document.body.appendChild(form); form.submit(); form.remove();
+      const f2 = document.createElement("textarea");
+      f2.name = "text"; f2.value = text; form.appendChild(f2);
+
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
     });
 
-    // -------- Download PDF (server POST; same tab) --------
+    // ------------ Download PDF (server POST; same tab) ------------
     document.getElementById("downloadPdfBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "pdf");
@@ -128,13 +129,18 @@
       const form = document.createElement("form");
       form.method = "POST";
       form.action = "/api/download-pdf";
-      form.target = "_self";
+      form.target = "_self";       // same tab avoids popup/sandbox issues
       form.style.display = "none";
 
-      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
-      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
+      const f1 = document.createElement("input");
+      f1.name = "filename"; f1.value = filename; form.appendChild(f1);
 
-      document.body.appendChild(form); form.submit(); form.remove();
+      const f2 = document.createElement("textarea");
+      f2.name = "text"; f2.value = text; form.appendChild(f2);
+
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
     });
   </script>
 </body>
