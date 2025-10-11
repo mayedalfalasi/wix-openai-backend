@@ -7,22 +7,28 @@
   <link rel="icon" href="data:,">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root{--bg:#0b1020;--card:#121833;--text:#e9eefb;--muted:#b7c0de;--accent:#7aa2ff}
+    :root{--bg:#0b1020;--card:#121833;--text:#e9eefb;--muted:#b7c0de;--accent:#7aa2ff;--ok:#7cffc1;--warn:#ffd36b;--bad:#ff6b6b}
     *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,Segoe UI,Inter,Roboto,Arial}
     .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
     .card{background:var(--card);border-radius:18px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.25);margin-bottom:16px}
-    label{font-weight:600;margin-bottom:6px;display:block} input,textarea{width:100%;border:1px solid #24305c;background:#0e1430;color:var(--text);border-radius:12px;padding:10px 12px}
-    .btn{display:inline-block;background:var(--accent);color:#03133a;padding:10px 14px;border-radius:12px;font-weight:700;cursor:pointer;border:none}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    label{font-weight:600;margin-bottom:6px;display:block}
+    input,textarea{width:100%;border:1px solid #24305c;background:#0e1430;color:var(--text);border-radius:12px;padding:10px 12px}
+    .btn{display:inline-block;background:var(--accent);color:#03133a;padding:10px 14px;border-radius:12px;font-weight:700;cursor:pointer;border:none}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
     .badge{background:#0e1430;border:1px solid #263477;padding:6px 10px;border-radius:999px;color:var(--muted);font-size:12px}
     .chartwrap{padding:10px;background:#0e1430;border:1px solid #2a3870;border-radius:12px}
+    .muted{color:var(--muted)}
+    .kpi{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+    .kpi > div{background:#0e1430;border:1px solid #263477;border-radius:12px;padding:8px;text-align:center}
+    canvas{image-rendering:crisp-edges}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>BizDoc — Document Analysis</h1>
-      <p style="color:var(--muted)">Domain: <code>https://wix-openai-backend-chi.vercel.app</code></p>
+      <p class="muted">Domain: <code>https://wix-openai-backend-chi.vercel.app</code></p>
       <div class="row">
         <div style="flex:1;min-width:260px">
           <label>Upload PDF / DOCX / TXT</label>
@@ -35,7 +41,7 @@
       </div>
       <div class="row" style="margin-top:10px">
         <button id="analyzeBtn" class="btn">Analyze</button>
-        <span id="status" style="color:#b7c0de"></span>
+        <span id="status" class="muted"></span>
       </div>
     </div>
 
@@ -45,8 +51,10 @@
         <span class="badge" id="metaType"></span>
         <span class="badge" id="metaSize"></span>
       </div>
+
       <h3>Summary</h3>
       <p id="summary"></p>
+
       <div class="row">
         <div style="flex:1;min-width:260px">
           <h3>Highlights</h3>
@@ -57,6 +65,7 @@
           <ul id="risks"></ul>
         </div>
       </div>
+
       <h3>Recommendations</h3>
       <ul id="recs"></ul>
 
@@ -72,18 +81,36 @@
         <button class="btn" id="downloadDocxBtn">Download .docx</button>
       </div>
     </div>
+
+    <!-- NEW: Animated Poster -->
+    <div id="posterCard" class="card" style="display:none">
+      <div class="row" style="justify-content:space-between">
+        <h3 style="margin:0">Graphical Poster (Animated)</h3>
+        <div class="muted" id="posterHint">Tip: Click “Record 3s WebM” for an animated download.</div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn" id="openPosterBtn">Open Poster</button>
+        <button class="btn" id="downloadPngBtn">Download Poster PNG</button>
+        <button class="btn" id="recordWebmBtn">Record 3s WebM</button>
+        <span id="posterStatus" class="muted"></span>
+      </div>
+      <div style="margin-top:10px; background:#0e1430;border:1px solid #2a3870;border-radius:12px;padding:8px">
+        <canvas id="posterCanvas" width="1200" height="1600" style="width:100%; height:auto; border-radius:12px;"></canvas>
+      </div>
+    </div>
   </div>
 
   <script>
     const API_BASE = "https://wix-openai-backend-chi.vercel.app";
-    let lastAnalysis = null, chart = null;
-
+    let lastAnalysis = null, chart = null, rafId = null, animStart = 0, animPhase = 0;
     const el = id => document.getElementById(id);
     const setStatus = m => el("status").textContent = m || "";
+    const setPosterStatus = m => el("posterStatus").textContent = m || "";
     const ensureExt = (name, ext) => { if(!name) return "analysis."+ext; name = name.replace(/\\s+/g,"_"); return name.endsWith("."+ext)? name : name+"."+ext; };
     const renderList = (id, arr) => { const ul = el(id); ul.innerHTML=""; (arr||[]).forEach(x=>{ const li=document.createElement("li"); li.textContent=x; ul.appendChild(li); }); };
 
-    async function analyze() {
+    // -------- Analyze flow --------
+    el("analyzeBtn").addEventListener("click", async () => {
       const f = el("file").files?.[0];
       if(!f){ setStatus("Pick a file first."); return; }
       const fd = new FormData();
@@ -101,6 +128,7 @@
       lastAnalysis = data;
       setStatus("Done.");
       el("resultCard").style.display = "block";
+      el("posterCard").style.display = "block"; // show poster tool
       el("metaName").textContent = data.meta.originalName;
       el("metaType").textContent = data.meta.mimetype;
       el("metaSize").textContent = (data.meta.sizeKB || 0) + " KB";
@@ -122,9 +150,9 @@
       });
 
       el("filename").value = data.suggestedFilename || "analysis";
-    }
-    el("analyzeBtn").addEventListener("click", analyze);
+    });
 
+    // -------- Downloads (txt/pdf/docx) --------
     async function download(type){
       if(!lastAnalysis){ setStatus("Analyze first."); return; }
       const filename = el("filename").value || "analysis";
@@ -144,6 +172,205 @@
     el("downloadTxtBtn").addEventListener("click", ()=>download("txt"));
     el("downloadPdfBtn").addEventListener("click", ()=>download("pdf"));
     el("downloadDocxBtn").addEventListener("click", ()=>download("docx"));
+
+    // -------- Animated Poster --------
+    const posterCanvas = el("posterCanvas");
+    const pctx = posterCanvas.getContext("2d");
+
+    function drawPoster(progress=1){
+      if(!lastAnalysis) return;
+      const { analysis, meta } = lastAnalysis;
+      const W = posterCanvas.width, H = posterCanvas.height;
+      pctx.clearRect(0,0,W,H);
+
+      // Background gradient + subtle pattern
+      const g = pctx.createLinearGradient(0,0,W,H);
+      const t = (Date.now()/1000)%1;
+      g.addColorStop(0, "#0b1020");
+      g.addColorStop(1, "#121833");
+      pctx.fillStyle = g;
+      pctx.fillRect(0,0,W,H);
+
+      // Animated floating particles (simple)
+      const particleCount = 60;
+      for(let i=0;i<particleCount;i++){
+        const px = (i*131 % W);
+        const py = (i*73 % H);
+        const offset = Math.sin((i*0.5) + (Date.now()*0.001))*8;
+        pctx.globalAlpha = 0.05;
+        pctx.fillStyle = "#7aa2ff";
+        pctx.beginPath(); pctx.arc((px+offset)%W, (py+offset)%H, 2, 0, Math.PI*2); pctx.fill();
+      }
+      pctx.globalAlpha = 1;
+
+      // Title
+      pctx.fillStyle = "#e9eefb";
+      pctx.font = "bold 64px Inter, Segoe UI, system-ui";
+      pctx.fillText("BizDoc Report", 64, 120);
+
+      // Domain
+      pctx.font = "24px Inter, Segoe UI, system-ui";
+      pctx.fillStyle = "#b7c0de";
+      pctx.fillText("wix-openai-backend-chi.vercel.app", 64, 160);
+
+      // Meta
+      pctx.font = "22px Inter, Segoe UI, system-ui";
+      pctx.fillStyle = "#b7c0de";
+      pctx.fillText(`File: ${meta.originalName || "-"}`, 64, 200);
+
+      // Summary box
+      pctx.fillStyle = "#0e1430";
+      roundRect(pctx, 64, 230, W-128, 240, 16, true);
+      pctx.fillStyle = "#e9eefb";
+      pctx.font = "bold 28px Inter, Segoe UI, system-ui";
+      pctx.fillText("Summary", 84, 270);
+      pctx.font = "22px Inter, Segoe UI, system-ui";
+      wrapText(pctx, analysis.summary || "", 84, 310, W-168, 28);
+
+      // Scores circular gauges (animated to 'progress')
+      const scores = analysis.scores || {};
+      const keys = ["finance","operations","marketing","compliance","technology"];
+      const cx = W/2, top = 520, radius = 110, gap = 200;
+
+      keys.forEach((k, idx) => {
+        const target = Math.max(0, Math.min(100, Number(scores[k]||0)));
+        const shown = target*progress;
+        const x = 120 + idx*gap;
+        const y = top + (idx%2? 10 : 0);
+
+        // gauge bg
+        pctx.strokeStyle = "#263477"; pctx.lineWidth = 18;
+        pctx.beginPath(); pctx.arc(x, y, radius, 0, Math.PI*2); pctx.stroke();
+
+        // gauge value (animated)
+        const start = -Math.PI/2;
+        const end = start + (Math.PI*2)*(shown/100);
+        const grad = pctx.createLinearGradient(x-radius, y-radius, x+radius, y+radius);
+        grad.addColorStop(0, "#7aa2ff");
+        grad.addColorStop(1, "#7cffc1");
+        pctx.strokeStyle = grad; pctx.lineWidth = 18; pctx.lineCap = "round";
+        pctx.beginPath(); pctx.arc(x, y, radius, start, end); pctx.stroke();
+
+        // label + value
+        pctx.fillStyle = "#e9eefb";
+        pctx.font = "20px Inter, Segoe UI, system-ui";
+        pctx.textAlign = "center";
+        pctx.fillText(k.toUpperCase(), x, y-8);
+        pctx.font = "bold 36px Inter, Segoe UI, system-ui";
+        pctx.fillText(`${Math.round(shown)}%`, x, y+34);
+        pctx.textAlign = "left";
+      });
+
+      // Highlights & Recs columns
+      const colW = (W-128-20)/2;
+      pctx.fillStyle = "#0e1430";
+      roundRect(pctx, 64, 880, colW, 580, 16, true);
+      roundRect(pctx, 64+colW+20, 880, colW, 580, 16, true);
+
+      pctx.fillStyle = "#e9eefb";
+      pctx.font = "bold 28px Inter, Segoe UI, system-ui";
+      pctx.fillText("Highlights", 84, 920);
+      pctx.fillText("Recommendations", 84+colW+20, 920);
+
+      pctx.font = "22px Inter, Segoe UI, system-ui";
+      const hl = (analysis.highlights||[]).slice(0,8).map(s=>`• ${s}`);
+      const rc = (analysis.recommendations||[]).slice(0,8).map(s=>`• ${s}`);
+      wrapLines(pctx, hl, 84, 960, colW-40, 28);
+      wrapLines(pctx, rc, 84+colW+20, 960, colW-40, 28);
+
+      // Footer accent
+      pctx.fillStyle = "#7aa2ff";
+      pctx.fillRect(64, H-40, W-128, 6);
+    }
+
+    function roundRect(ctx, x, y, w, h, r, fill){
+      ctx.beginPath();
+      ctx.moveTo(x+r, y);
+      ctx.arcTo(x+w, y, x+w, y+h, r);
+      ctx.arcTo(x+w, y+h, x, y+h, r);
+      ctx.arcTo(x, y+h, x, y, r);
+      ctx.arcTo(x, y, x+w, y, r);
+      ctx.closePath();
+      if(fill) ctx.fill();
+    }
+
+    function wrapText(ctx, text, x, y, maxWidth, lineHeight){
+      const words = String(text||"").split(/\s+/); let line = "";
+      for(let n=0; n<words.length; n++){
+        const test = line + words[n] + " ";
+        if(ctx.measureText(test).width > maxWidth && n>0){
+          ctx.fillText(line, x, y); line = words[n] + " "; y += lineHeight;
+        } else { line = test; }
+      }
+      ctx.fillText(line, x, y);
+    }
+
+    function wrapLines(ctx, lines, x, y, maxWidth, lineHeight){
+      lines.forEach(line => { wrapText(ctx, line, x, y, maxWidth, lineHeight); y += lineHeight; });
+    }
+
+    function startPosterAnimation(){
+      cancelAnimationFrame(rafId);
+      animStart = performance.now();
+      const animate = (now) => {
+        const elapsed = (now - animStart) / 1200; // 1.2s ease-in
+        const p = Math.min(1, easeOutCubic(elapsed));
+        drawPoster(p);
+        if(p < 1){ rafId = requestAnimationFrame(animate); }
+        else {
+          // subtle breathing loop on gauges after first fill
+          animPhase += 0.02;
+          drawPoster(1 - Math.sin(animPhase)*0.02);
+          rafId = requestAnimationFrame(() => startPosterAnimation());
+        }
+      };
+      rafId = requestAnimationFrame(animate);
+    }
+    function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
+    el("openPosterBtn").addEventListener("click", () => {
+      if(!lastAnalysis){ setPosterStatus("Analyze first."); return; }
+      setPosterStatus("Animating…");
+      startPosterAnimation();
+      setTimeout(()=> setPosterStatus(""), 1000);
+    });
+
+    el("downloadPngBtn").addEventListener("click", () => {
+      if(!lastAnalysis){ setPosterStatus("Analyze first."); return; }
+      cancelAnimationFrame(rafId); drawPoster(1);
+      const url = posterCanvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      const base = (el("filename").value || "analysis").replace(/\\s+/g,"_");
+      a.href = url; a.download = base + "_poster.png";
+      document.body.appendChild(a); a.click(); a.remove();
+      setPosterStatus("PNG downloaded.");
+      setTimeout(()=> setPosterStatus(""), 1200);
+    });
+
+    el("recordWebmBtn").addEventListener("click", async () => {
+      if(!lastAnalysis){ setPosterStatus("Analyze first."); return; }
+      setPosterStatus("Recording 3s…");
+      // Run animation
+      startPosterAnimation();
+      // Record the canvas stream to WebM (Chrome)
+      const stream = posterCanvas.captureStream(30);
+      const chunks = [];
+      const rec = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9" });
+      rec.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+      rec.onstop = () => {
+        const blob = new Blob(chunks, { type: "video/webm" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const base = (el("filename").value || "analysis").replace(/\\s+/g,"_");
+        a.href = url; a.download = base + "_poster.webm";
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        setPosterStatus("WebM downloaded.");
+        setTimeout(()=> setPosterStatus(""), 1200);
+      };
+      rec.start();
+      setTimeout(()=> rec.stop(), 3000);
+    });
   </script>
 </body>
 </html>
