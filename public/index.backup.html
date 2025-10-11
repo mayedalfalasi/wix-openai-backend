@@ -11,21 +11,18 @@
     *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,Segoe UI,Inter,Roboto,Arial}
     .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
     .card{background:var(--card);border-radius:18px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.25);margin-bottom:16px}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    label{font-weight:600;margin-bottom:6px;display:block}
-    input,textarea{width:100%;border:1px solid #24305c;background:#0e1430;color:var(--text);border-radius:12px;padding:10px 12px}
+    label{font-weight:600;margin-bottom:6px;display:block} input,textarea{width:100%;border:1px solid #24305c;background:#0e1430;color:var(--text);border-radius:12px;padding:10px 12px}
     .btn{display:inline-block;background:var(--accent);color:#03133a;padding:10px 14px;border-radius:12px;font-weight:700;cursor:pointer;border:none}
-    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .badge{background:#0e1430;border:1px solid #263477;padding:6px 10px;border-radius:999px;color:var(--muted);font-size:12px}
     .chartwrap{padding:10px;background:#0e1430;border:1px solid #2a3870;border-radius:12px}
-    .muted{color:var(--muted)}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
       <h1>BizDoc — Document Analysis</h1>
-      <p class="muted">Upload a file, get AI insights, and download a designed PDF poster.</p>
+      <p style="color:var(--muted)">Domain: <code>https://wix-openai-backend-chi.vercel.app</code></p>
       <div class="row">
         <div style="flex:1;min-width:260px">
           <label>Upload PDF / DOCX / TXT</label>
@@ -38,7 +35,7 @@
       </div>
       <div class="row" style="margin-top:10px">
         <button id="analyzeBtn" class="btn">Analyze</button>
-        <span id="status" class="muted"></span>
+        <span id="status" style="color:#b7c0de"></span>
       </div>
     </div>
 
@@ -48,10 +45,8 @@
         <span class="badge" id="metaType"></span>
         <span class="badge" id="metaSize"></span>
       </div>
-
       <h3>Summary</h3>
       <p id="summary"></p>
-
       <div class="row">
         <div style="flex:1;min-width:260px">
           <h3>Highlights</h3>
@@ -62,7 +57,6 @@
           <ul id="risks"></ul>
         </div>
       </div>
-
       <h3>Recommendations</h3>
       <ul id="recs"></ul>
 
@@ -72,21 +66,24 @@
       </div>
 
       <div class="row" style="margin-top:12px">
-        <input id="filename" type="text" placeholder="analysis_poster" style="flex:1;min-width:200px" />
-        <button class="btn" id="downloadPdfBtn">Download Poster PDF</button>
+        <input id="filename" type="text" placeholder="analysis" style="flex:1;min-width:200px" />
+        <button class="btn" id="downloadTxtBtn">Download .txt</button>
+        <button class="btn" id="downloadPdfBtn">Download .pdf</button>
+        <button class="btn" id="downloadDocxBtn">Download .docx</button>
       </div>
     </div>
   </div>
 
   <script>
-    const API_BASE = ""; // same origin
+    const API_BASE = "https://wix-openai-backend-chi.vercel.app";
     let lastAnalysis = null, chart = null;
 
     const el = id => document.getElementById(id);
     const setStatus = m => el("status").textContent = m || "";
+    const ensureExt = (name, ext) => { if(!name) return "analysis."+ext; name = name.replace(/\\s+/g,"_"); return name.endsWith("."+ext)? name : name+"."+ext; };
     const renderList = (id, arr) => { const ul = el(id); ul.innerHTML=""; (arr||[]).forEach(x=>{ const li=document.createElement("li"); li.textContent=x; ul.appendChild(li); }); };
 
-    el("analyzeBtn").addEventListener("click", async () => {
+    async function analyze() {
       const f = el("file").files?.[0];
       if(!f){ setStatus("Pick a file first."); return; }
       const fd = new FormData();
@@ -107,6 +104,7 @@
       el("metaName").textContent = data.meta.originalName;
       el("metaType").textContent = data.meta.mimetype;
       el("metaSize").textContent = (data.meta.sizeKB || 0) + " KB";
+
       el("summary").textContent = data.analysis.summary || "";
       renderList("highlights", data.analysis.highlights);
       renderList("risks", data.analysis.risks);
@@ -115,6 +113,7 @@
       const scores = data.analysis.scores || {};
       const labels = Object.keys(scores);
       const values = labels.map(k => scores[k]);
+
       if(chart){ chart.destroy(); }
       const ctx = document.getElementById('scoreChart').getContext('2d');
       chart = new Chart(ctx, { type: 'radar',
@@ -122,25 +121,29 @@
         options: { responsive: true, scales: { r: { min: 0, max: 100 } } }
       });
 
-      el("filename").value = data.suggestedFilename || "analysis_poster";
-    });
+      el("filename").value = data.suggestedFilename || "analysis";
+    }
+    el("analyzeBtn").addEventListener("click", analyze);
 
-    el("downloadPdfBtn").addEventListener("click", async () => {
+    async function download(type){
       if(!lastAnalysis){ setStatus("Analyze first."); return; }
-      const filename = el("filename").value || "analysis_poster";
+      const filename = el("filename").value || "analysis";
       const res = await fetch(API_BASE + "/api/download", {
         method: "POST",
         headers: { "Content-Type":"application/json" },
-        body: JSON.stringify({ filename, content: lastAnalysis.analysis })
+        body: JSON.stringify({ type, filename, content: lastAnalysis.analysis })
       });
       if(!res.ok){ setStatus("Download failed."); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = filename.replace(/\s+/g,"_") + ".pdf";
+      a.href = url; a.download = ensureExt(filename, type);
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    });
+    }
+    el("downloadTxtBtn").addEventListener("click", ()=>download("txt"));
+    el("downloadPdfBtn").addEventListener("click", ()=>download("pdf"));
+    el("downloadDocxBtn").addEventListener("click", ()=>download("docx"));
   </script>
 </body>
 </html>

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // /api/download-pdf.js  (ESM)
 export default async function handler(req, res) {
   try {
@@ -60,3 +61,43 @@ export default async function handler(req, res) {
     res.status(500).json({ error: "Failed to generate PDF" });
   }
 }
+=======
+module.exports = async (req, res) => {
+  try {
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      res.setHeader('Allow', 'POST');
+      return res.end('Method Not Allowed');
+    }
+
+    let body = '';
+    req.on('data', d => body += d);
+    await new Promise(r => req.on('end', r));
+
+    let params = {};
+    try {
+      body.split('&').forEach(p => {
+        const [k,v] = p.split('=');
+        if (k) params[decodeURIComponent(k)] = decodeURIComponent((v||'').replace(/\+/g,' '));
+      });
+    } catch {}
+
+    const text = params.text || '';
+    const filename = (params.filename || 'analysis.pdf').replace(/[^\w.\-]/g,'_');
+    if (!text) {
+      res.statusCode = 400;
+      return res.end('No text provided');
+    }
+
+    // NOTE: This is still plain text but with a PDF filename, so browsers save it.
+    res.statusCode = 200;
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.end(text, 'utf-8');
+  } catch (e) {
+    res.statusCode = 500;
+    res.setHeader('Content-Type','text/plain; charset=utf-8');
+    res.end('PDF_DOWNLOAD_FAILED: ' + String(e?.message||e));
+  }
+};
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
