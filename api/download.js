@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // api/download.js
 // Vercel serverless function to download analysis text as a file.
 // - GET:  /api/download?filename=analysis.txt&text=... (good for short text)
@@ -55,5 +56,44 @@ module.exports = async (req, res) => {
   } catch (e) {
     console.error("download.js error:", e?.message || e);
     return res.status(500).json({ error: "Failed to prepare download" });
+=======
+module.exports = async (req, res) => {
+  try {
+    if (req.method !== 'POST') {
+      res.statusCode = 405;
+      res.setHeader('Allow', 'POST');
+      return res.end('Method Not Allowed');
+    }
+
+    // simple urlencoded or multipart text fields support
+    let body = '';
+    req.on('data', d => body += d);
+    await new Promise(r => req.on('end', r));
+
+    // naive parse (works for application/x-www-form-urlencoded)
+    let params = {};
+    try {
+      body.split('&').forEach(p => {
+        const [k,v] = p.split('=');
+        if (k) params[decodeURIComponent(k)] = decodeURIComponent((v||'').replace(/\+/g,' '));
+      });
+    } catch {}
+
+    const text = params.text || '';
+    const filename = (params.filename || 'analysis.txt').replace(/[^\w.\-]/g,'_');
+    if (!text) {
+      res.statusCode = 400;
+      return res.end('No text provided');
+    }
+
+    res.statusCode = 200;
+    res.setHeader('Content-Type','text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.end(text, 'utf-8');
+  } catch (e) {
+    res.statusCode = 500;
+    res.setHeader('Content-Type','text/plain; charset=utf-8');
+    res.end('DOWNLOAD_FAILED: ' + String(e?.message||e));
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
   }
 };

@@ -4,7 +4,11 @@
   <meta charset="utf-8" />
   <title>AI Document Analyzer</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+<<<<<<< HEAD
   <!-- MARKER: INDEX PDF-LIVE v103 -->
+=======
+  <!-- MARKER: INDEX BRIDGED v4 -->
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, Arial, Segoe UI; margin: 24px; color: #111; }
@@ -12,7 +16,11 @@
     h1 { margin: 0 0 8px; }
     p.sub { color: #666; margin-top: 0; }
     label { display:block; margin: 14px 0 6px; font-weight: 500; }
+<<<<<<< HEAD
     input[type=file], textarea, select, input[type=text] {
+=======
+    input[type=file], textarea, input[type=text] {
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
       width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 10px; background: #fff;
     }
     textarea { font-family: ui-monospace, Consolas; }
@@ -25,7 +33,11 @@
 <body>
   <div class="wrap">
     <h1>AI Document Analyzer</h1>
+<<<<<<< HEAD
     <p class="sub">Upload a file, add instructions, get an AI summary, and download the result as <strong>.txt</strong> or <strong>PDF</strong>.</p>
+=======
+    <p class="sub">Upload a file, add instructions, get an AI summary, and download as .txt or PDF.</p>
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
 
     <!-- Upload -->
     <label>Upload file</label>
@@ -56,7 +68,11 @@
   </div>
 
   <script>
+<<<<<<< HEAD
     // ------------ Config / helpers ------------
+=======
+    // ---------- Config / helpers ----------
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
     const API_URL = "/api/analyze";
     const MAX_MB = 20;
 
@@ -66,7 +82,19 @@
       return name;
     }
 
+<<<<<<< HEAD
     // ------------ Analyze ------------
+=======
+    // Are we embedded (e.g., Wix iframe)?
+    function inIframe(){ try { return window.self !== window.top; } catch(e){ return true; } }
+    function postToParent(type, payload){
+      if (!inIframe()) return false;
+      window.parent.postMessage({ source:"vercel-analyzer", type, payload }, "*");
+      return true;
+    }
+
+    // ---------- Analyze ----------
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
     document.getElementById("analyzeBtn").addEventListener("click", async () => {
       const file = document.getElementById("file").files?.[0];
       const out = document.getElementById("out");
@@ -97,12 +125,17 @@
       }
     });
 
+<<<<<<< HEAD
     // ------------ Download .txt (server POST; same tab) ------------
+=======
+    // ---------- Download .txt (bridged) ----------
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
     document.getElementById("downloadTxtBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "txt");
       if (!text.trim()) { document.getElementById("status2").textContent = "Analyze something first."; return; }
 
+<<<<<<< HEAD
       const form = document.createElement("form");
       form.method = "POST";
       form.action = "/api/download";
@@ -121,11 +154,25 @@
     });
 
     // ------------ Download PDF (server POST; same tab) ------------
+=======
+      if (postToParent("DOWNLOAD_TXT", { filename, text })) return; // Wix parent will handle it
+
+      // Direct (not embedded): normal POST → triggers download
+      const form = document.createElement("form");
+      form.method = "POST"; form.action = "/api/download"; form.target = "_self"; form.style.display = "none";
+      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
+      document.body.appendChild(form); form.submit(); form.remove();
+    });
+
+    // ---------- Download PDF (bridged) ----------
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
     document.getElementById("downloadPdfBtn").addEventListener("click", () => {
       const text = document.getElementById("out").value || "";
       const filename = ensureExt(document.getElementById("filename").value, "pdf");
       if (!text.trim()) { document.getElementById("status2").textContent = "Analyze something first."; return; }
 
+<<<<<<< HEAD
       const form = document.createElement("form");
       form.method = "POST";
       form.action = "/api/download-pdf";
@@ -141,6 +188,15 @@
       document.body.appendChild(form);
       form.submit();
       form.remove();
+=======
+      if (postToParent("DOWNLOAD_PDF", { filename, text })) return; // Wix parent will handle it
+
+      const form = document.createElement("form");
+      form.method = "POST"; form.action = "/api/download-pdf"; form.target = "_self"; form.style.display = "none";
+      const f1 = document.createElement("input"); f1.name = "filename"; f1.value = filename; form.appendChild(f1);
+      const f2 = document.createElement("textarea"); f2.name = "text"; f2.value = text; form.appendChild(f2);
+      document.body.appendChild(form); form.submit(); form.remove();
+>>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
     });
   </script>
 </body>
