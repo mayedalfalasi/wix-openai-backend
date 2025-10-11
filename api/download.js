@@ -7,26 +7,31 @@ function setCORS(res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
-function wrapText(str, max = 90) {
-  const words = (str || "").split(/\s+/);
-  const lines = [];
-  let cur = "";
+function wrapToLines(text, maxChars = 100) {
+  const words = String(text || "").split(/\s+/);
+  const out = [];
+  let line = "";
   for (const w of words) {
-    if ((cur + " " + w).trim().length > max) { lines.push(cur.trim()); cur = w; }
-    else { cur += " " + w; }
+    const test = (line ? line + " " : "") + w;
+    if (test.length > maxChars) {
+      if (line) out.push(line);
+      line = w;
+    } else {
+      line = test;
+    }
   }
-  if (cur.trim()) lines.push(cur.trim());
-  return lines.join("\n");
+  if (line) out.push(line);
+  return out;
 }
 
 function analysisToPlain(a) {
   const s = [];
-  s.push("# Summary\n" + (a.summary || ""));
-  s.push("\n# Highlights\n- " + (a.highlights || []).join("\n- "));
-  s.push("\n# Risks\n- " + (a.risks || []).join("\n- "));
-  s.push("\n# Recommendations\n- " + (a.recommendations || []).join("\n- "));
+  s.push("# Summary", a.summary || "");
+  s.push("", "# Highlights", ...(a.highlights || []).map(x => "- " + x));
+  s.push("", "# Risks", ...(a.risks || []).map(x => "- " + x));
+  s.push("", "# Recommendations", ...(a.recommendations || []).map(x => "- " + x));
   if (a.scores) {
-    s.push("\n# Scores");
+    s.push("", "# Scores");
     for (const k of Object.keys(a.scores)) s.push(`- ${k}: ${a.scores[k]}`);
   }
   return s.join("\n");
@@ -35,12 +40,12 @@ function analysisToPlain(a) {
 export default async function handler(req, res) {
   setCORS(res);
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
-  if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Use POST" }); return; }
+  if (req.method !== "POST") { res.status(405).json({ ok:false, error:"Use POST" }); return; }
 
   try {
     const { type, filename, content } = await new Promise((resolve, reject) => {
       let body = "";
-      req.on("data", chunk => body += chunk);
+      req.on("data", c => body += c);
       req.on("end", () => { try { resolve(JSON.parse(body || "{}")); } catch(e){ reject(new Error("Invalid JSON body")); }});
       req.on("error", reject);
     });
@@ -57,26 +62,35 @@ export default async function handler(req, res) {
     }
 
     if (type === "pdf") {
+      // Build PDF line-by-line with pagination
       const pdfDoc = await PDFDocument.create();
-      pdfDoc.addPage([595.28, 841.89]); // first page A4
+      const pageSize = [595.28, 841.89]; // A4
+      let page = pdfDoc.addPage(pageSize);
       const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const fontSize = 11, margin = 40;
-      const lines = wrapText(plain, 100).split("\n");
-
-      let page = pdfDoc.getPage(0);
-      let y = page.getHeight() - margin;
+      const fontSize = 11;
+      const margin = 40;
       const lineHeight = 14;
+      const maxChars = 100;
+
+      let y = page.getHeight() - margin;
+      const lines = plain.split("\n").flatMap(l => wrapToLines(l, maxChars));
 
       for (const line of lines) {
-        if (y < margin) { page = pdfDoc.addPage([595.28, 841.89]); y = page.getHeight() - margin; }
+        if (y < margin) {
+          page = pdfDoc.addPage(pageSize);
+          y = page.getHeight() - margin;
+        }
         page.drawText(line, { x: margin, y, size: fontSize, font });
         y -= lineHeight;
       }
 
-      const pdfBytes = await pdfDoc.save();
+      // Ensure we send a Node Buffer
+      const pdfBytes = await pdfDoc.save(); // Uint8Array
+      const buf = Buffer.from(pdfBytes.buffer, pdfBytes.byteOffset, pdfBytes.byteLength);
+
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${safeName}.pdf"`);
-      res.status(200).send(Buffer.from(pdfBytes));
+      res.status(200).send(buf);
       return;
     }
 
@@ -88,7 +102,6 @@ export default async function handler(req, res) {
         else for (const line of String(body || "").split("\n")) paragraphs.push(new Paragraph(line));
         paragraphs.push(new Paragraph(""));
       };
-
       add("Summary", a.summary || "");
       add("Highlights", (a.highlights || []).map(x => "• " + x));
       add("Risks", (a.risks || []).map(x => "• " + x));
@@ -103,8 +116,8 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.status(400).json({ ok: false, error: "Unknown type. Use txt|pdf|docx" });
+    res.status(400).json({ ok:false, error:"Unknown type. Use txt|pdf|docx" });
   } catch (err) {
-    res.status(400).json({ ok: false, error: err.message || String(err) });
+    res.status(400).json({ ok:false, error: err.message || String(err) });
   }
 }
