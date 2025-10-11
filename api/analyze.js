@@ -1,125 +1,122 @@
-const Busboy = require('busboy');
-<<<<<<< HEAD
-const OpenAI = require('openai');
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+import fs from "fs";
+import path from "path";
+import formidable from "formidable";
+import pdf from "pdf-parse";
+import mammoth from "mammoth";
 
-module.exports = async (req, res) => {
-  if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+const MAX_BYTES = 10 * 1024 * 1024; // 10MB
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  const bb = Busboy({ headers: req.headers, limits: { fileSize: 20 * 1024 * 1024 } });
-  let instruction = '';
-  let text = '';
-
-  bb.on('field', (n, v) => { if (n === 'instruction') instruction = v; });
-  bb.on('file', (_n, file) => {
-    const chunks = [];
-    file.on('data', d => chunks.push(d));
-    file.on('end', () => text = Buffer.concat(chunks).toString('utf8'));
-  });
-
-  bb.on('finish', async () => {
-    if (!text.trim()) return res.status(400).json({ error: 'Empty or unreadable file.' });
-
-    const prompt = instruction || 'Summarize this document for a business audience.';
-    try {
-      const r = await client.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a concise document analyst.' },
-          { role: 'user', content: `${prompt}\n\n---\n${text}` }
-        ]
-      });
-      res.json({ result: r.choices[0].message.content });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  req.pipe(bb);
-=======
-
-function send(res, code, obj) {
-  res.statusCode = code;
-  res.setHeader('Content-Type','application/json; charset=utf-8');
-  res.end(JSON.stringify(obj));
+function setCORS(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
-module.exports = async (req, res) => {
+async function parseForm(req) {
+  const form = formidable({ multiples: false, keepExtensions: true, maxFileSize: MAX_BYTES });
+  return await new Promise((resolve, reject) => {
+    form.parse(req, (err, fields, files) => {
+      if (err) return reject(err);
+      resolve({ fields, files });
+    });
+  });
+}
+
+async function extractText(file) {
+  const p = file.filepath || file.path;
+  const mimetype = file.mimetype || "application/octet-stream";
+  const name = file.originalFilename || path.basename(p);
+
+  if (mimetype === "application/pdf" || name.toLowerCase().endsWith(".pdf")) {
+    const buf = fs.readFileSync(p);
+    const out = await pdf(buf);
+    return out.text || "";
+  }
+  if (name.toLowerCase().endsWith(".docx")) {
+    const out = await mammoth.extractRawText({ path: p });
+    return out.value || "";
+  }
+  // treat the rest as plain text
+  return fs.readFileSync(p, "utf8");
+}
+
+function buildPrompt(docText, extra) {
+  const system = `You are BizDoc, an AI consultant for SMEs. Analyze the document and return STRICT JSON:
+{
+  "summary": string,
+  "highlights": string[],
+  "risks": string[],
+  "recommendations": string[],
+  "scores": { "finance": number, "operations": number, "marketing": number, "compliance": number, "technology": number }
+}
+Keep summary < 300 words. Scores are 0-100. Do not add fields outside this schema.`;
+
+  const user = `Document (first 10k chars):
+"""${docText.slice(0, 10000)}"""
+
+Extra instruction: ${extra || "(none)"}`;
+
+  return { system, user };
+}
+
+export const config = { api: { bodyParser: false } };
+
+export default async function handler(req, res) {
+  setCORS(res);
+  if (req.method === "OPTIONS") { res.status(204).end(); return; }
+  if (req.method !== "POST") { res.status(405).json({ ok: false, error: "Use POST" }); return; }
+
   try {
-    if (req.method !== 'POST') {
-      res.setHeader('Allow', 'POST');
-      return send(res, 405, { ok:false, error:'Method not allowed' });
+    const { fields, files } = await parseForm(req);
+    const instruction = (fields.instruction && String(Array.isArray(fields.instruction) ? fields.instruction[0] : fields.instruction)) || "";
+    const file = files.file && (Array.isArray(files.file) ? files.file[0] : files.file);
+    if (!file) { res.status(400).json({ ok: false, error: "No file uploaded" }); return; }
+    if ((file.size || 0) > MAX_BYTES) { res.status(413).json({ ok: false, error: "File too large (10MB limit)" }); return; }
+
+    const text = await extractText(file);
+    if (!OPENAI_API_KEY) { res.status(500).json({ ok: false, error: "OPENAI_API_KEY not set" }); return; }
+
+    const { system, user } = buildPrompt(text, instruction);
+
+    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user }
+        ]
+      })
+    });
+
+    if (!r.ok) {
+      const t = await r.text();
+      res.status(500).json({ ok: false, error: "OpenAI request failed", detail: t.slice(0, 500) });
+      return;
     }
 
-    const bb = Busboy({ headers: req.headers, limits: { fileSize: 20 * 1024 * 1024 } });
-    let instruction = '';
-    let text = '';
-    let fileReceived = false;
+    const j = await r.json();
+    const content = j.choices?.[0]?.message?.content || "{}";
+    let analysis;
+    try { analysis = JSON.parse(content); } 
+    catch {
+      analysis = { summary: content, highlights: [], risks: [], recommendations: [], scores: {} };
+    }
 
-    bb.on('field', (name, value) => {
-      if (name === 'instruction') instruction = String(value || '');
-    });
+    const meta = {
+      originalName: file.originalFilename || "document",
+      mimetype: file.mimetype || "application/octet-stream",
+      sizeKB: Math.round((file.size || 0) / 1024)
+    };
+    const suggestedFilename = (meta.originalName.split(".")[0] || "analysis") + "_analysis";
 
-    bb.on('file', (_name, file) => {
-      fileReceived = true;
-      const chunks = [];
-      file.on('data', d => chunks.push(d));
-      file.on('end', () => { text = Buffer.concat(chunks).toString('utf8') });
-    });
-
-    bb.on('error', (e) => {
-      return send(res, 400, { ok:false, error:'UPLOAD_PARSE_FAILED', detail:String(e?.message||e) });
-    });
-
-    bb.on('finish', async () => {
-      try {
-        if (!fileReceived) return send(res, 400, { ok:false, error:'NO_FILE', detail:'Upload a file under the "file" field.' });
-        if (!text.trim())  return send(res, 400, { ok:false, error:'EMPTY_FILE', detail:'File was empty or unreadable.' });
-
-        const prompt = instruction || 'Summarize this document for a business audience.';
-
-        // Bypass OpenAI if ?noai=1 or no key set
-        const skipAI = (req.url || '').includes('noai=1') || !process.env.OPENAI_API_KEY;
-        if (skipAI) {
-          return send(res, 200, {
-            ok:true,
-            mode: 'noai',
-            instruction: prompt,
-            bytes: Buffer.byteLength(text),
-            preview: text.slice(0, 600)
-          });
-        }
-
-        // OpenAI call
-        let result = 'No result.';
-        try {
-          const OpenAI = require('openai');
-          const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-          const r = await client.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: 'You are a concise document analyst.' },
-              { role: 'user', content: `${prompt}\n\n---\n${text}` }
-            ],
-            temperature: 0.2
-          });
-          result = (r.choices?.[0]?.message?.content || '').trim() || result;
-        } catch (e) {
-          return send(res, 500, { ok:false, error:'OPENAI_FAILED', detail:String(e?.message||e) });
-        }
-
-        return send(res, 200, { ok:true, result });
-      } catch (e) {
-        return send(res, 500, { ok:false, error:'ANALYZE_FAILED', detail:String(e?.message||e) });
-      }
-    });
-
-    req.pipe(bb);
-  } catch (e) {
-    return send(res, 500, { ok:false, error:'HANDLER_CRASH', detail:String(e?.message||e) });
+    res.status(200).json({ ok: true, meta, analysis, suggestedFilename });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message || String(err) });
   }
->>>>>>> 5e49a50 (feat: stable analyze (busboy), health, download, minimal vercel.json)
-};
+}

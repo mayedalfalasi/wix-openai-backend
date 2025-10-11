@@ -3,23 +3,147 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BizDoc — Vercel Baseline</title>
+  <title>BizDoc — Analysis</title>
+  <link rel="icon" href="data:,">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    body{font:16px/1.5 system-ui,Segoe UI,Inter,Roboto,Arial;margin:0;background:#0b1020;color:#e9eefb}
-    .wrap{max-width:900px;margin:40px auto;padding:0 16px}
-    .card{background:#121833;border-radius:16px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
-    a{color:#7aa2ff}
-    code{background:#0e1430;padding:2px 6px;border-radius:6px}
+    :root{--bg:#0b1020;--card:#121833;--text:#e9eefb;--muted:#b7c0de;--accent:#7aa2ff}
+    *{box-sizing:border-box} html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,Segoe UI,Inter,Roboto,Arial}
+    .wrap{max-width:1100px;margin:40px auto;padding:0 16px}
+    .card{background:var(--card);border-radius:18px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.25);margin-bottom:16px}
+    label{font-weight:600;margin-bottom:6px;display:block} input,textarea{width:100%;border:1px solid #24305c;background:#0e1430;color:var(--text);border-radius:12px;padding:10px 12px}
+    .btn{display:inline-block;background:var(--accent);color:#03133a;padding:10px 14px;border-radius:12px;font-weight:700;cursor:pointer;border:none}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .badge{background:#0e1430;border:1px solid #263477;padding:6px 10px;border-radius:999px;color:var(--muted);font-size:12px}
+    .chartwrap{padding:10px;background:#0e1430;border:1px solid #2a3870;border-radius:12px}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>BizDoc — Vercel Baseline</h1>
-      <p>Deployment OK. Try the health endpoint:</p>
-      <p><a href="/api/health">/api/health</a></p>
-      <p>Next we’ll add <code>/api/analyze</code> and download endpoints.</p>
+      <h1>BizDoc — Document Analysis</h1>
+      <p style="color:var(--muted)">Domain: <code>https://wix-openai-backend-chi.vercel.app</code></p>
+      <div class="row">
+        <div style="flex:1;min-width:260px">
+          <label>Upload PDF / DOCX / TXT</label>
+          <input id="file" type="file" accept=".pdf,.docx,.txt,.md,.rtf" />
+        </div>
+        <div style="flex:1;min-width:260px">
+          <label>Optional instructions</label>
+          <textarea id="instruction" placeholder="e.g., Financial health check with scorecard and actions"></textarea>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="analyzeBtn" class="btn">Analyze</button>
+        <span id="status" style="color:#b7c0de"></span>
+      </div>
+    </div>
+
+    <div id="resultCard" class="card" style="display:none">
+      <div class="row">
+        <span class="badge" id="metaName"></span>
+        <span class="badge" id="metaType"></span>
+        <span class="badge" id="metaSize"></span>
+      </div>
+      <h3>Summary</h3>
+      <p id="summary"></p>
+      <div class="row">
+        <div style="flex:1;min-width:260px">
+          <h3>Highlights</h3>
+          <ul id="highlights"></ul>
+        </div>
+        <div style="flex:1;min-width:260px">
+          <h3>Risks</h3>
+          <ul id="risks"></ul>
+        </div>
+      </div>
+      <h3>Recommendations</h3>
+      <ul id="recs"></ul>
+
+      <h3>Scorecard</h3>
+      <div class="chartwrap">
+        <canvas id="scoreChart"></canvas>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <input id="filename" type="text" placeholder="analysis" style="flex:1;min-width:200px" />
+        <button class="btn" id="downloadTxtBtn">Download .txt</button>
+        <button class="btn" id="downloadPdfBtn">Download .pdf</button>
+        <button class="btn" id="downloadDocxBtn">Download .docx</button>
+      </div>
     </div>
   </div>
+
+  <script>
+    const API_BASE = "https://wix-openai-backend-chi.vercel.app";
+    let lastAnalysis = null, chart = null;
+
+    const el = id => document.getElementById(id);
+    const setStatus = m => el("status").textContent = m || "";
+    const ensureExt = (name, ext) => { if(!name) return "analysis."+ext; name = name.replace(/\\s+/g,"_"); return name.endsWith("."+ext)? name : name+"."+ext; };
+    const renderList = (id, arr) => { const ul = el(id); ul.innerHTML=""; (arr||[]).forEach(x=>{ const li=document.createElement("li"); li.textContent=x; ul.appendChild(li); }); };
+
+    async function analyze() {
+      const f = el("file").files?.[0];
+      if(!f){ setStatus("Pick a file first."); return; }
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("instruction", el("instruction").value || "");
+
+      setStatus("Uploading & analyzing…");
+      el("analyzeBtn").disabled = true;
+
+      const res = await fetch(API_BASE + "/api/analyze", { method: "POST", body: fd });
+      const data = await res.json().catch(()=>({ ok:false, error:"Invalid JSON from server"}));
+      el("analyzeBtn").disabled = false;
+      if(!data.ok){ setStatus("Error: " + (data.error || "Unknown")); return; }
+
+      lastAnalysis = data;
+      setStatus("Done.");
+      el("resultCard").style.display = "block";
+      el("metaName").textContent = data.meta.originalName;
+      el("metaType").textContent = data.meta.mimetype;
+      el("metaSize").textContent = (data.meta.sizeKB || 0) + " KB";
+
+      el("summary").textContent = data.analysis.summary || "";
+      renderList("highlights", data.analysis.highlights);
+      renderList("risks", data.analysis.risks);
+      renderList("recs", data.analysis.recommendations);
+
+      const scores = data.analysis.scores || {};
+      const labels = Object.keys(scores);
+      const values = labels.map(k => scores[k]);
+
+      if(chart){ chart.destroy(); }
+      const ctx = document.getElementById('scoreChart').getContext('2d');
+      chart = new Chart(ctx, { type: 'radar',
+        data: { labels, datasets: [{ label: 'Scores', data: values }]},
+        options: { responsive: true, scales: { r: { min: 0, max: 100 } } }
+      });
+
+      el("filename").value = data.suggestedFilename || "analysis";
+    }
+    el("analyzeBtn").addEventListener("click", analyze);
+
+    async function download(type){
+      if(!lastAnalysis){ setStatus("Analyze first."); return; }
+      const filename = el("filename").value || "analysis";
+      const res = await fetch(API_BASE + "/api/download", {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ type, filename, content: lastAnalysis.analysis })
+      });
+      if(!res.ok){ setStatus("Download failed."); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = ensureExt(filename, type);
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+    el("downloadTxtBtn").addEventListener("click", ()=>download("txt"));
+    el("downloadPdfBtn").addEventListener("click", ()=>download("pdf"));
+    el("downloadDocxBtn").addEventListener("click", ()=>download("docx"));
+  </script>
 </body>
 </html>

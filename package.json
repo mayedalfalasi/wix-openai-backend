@@ -1,7 +1,7 @@
 {
   "name": "wix-openai-backend",
-  "version": "1.1.0",
-  "description": "BizDoc on Vercel — health, analyze, and downloads",
+  "version": "1.2.0",
+  "description": "BizDoc on Vercel — upload, analyze (OpenAI), and download TXT/PDF/DOCX",
   "license": "ISC",
   "type": "module",
   "scripts": {
